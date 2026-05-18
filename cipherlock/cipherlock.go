@@ -1,111 +1,98 @@
 package cipherlock
 
 import (
-	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/sha1"
-	"encoding/hex"
+	"errors"
 	"io"
-	"io/ioutil"
-	"os"
 
-	"golang.org/x/crypto/pbkdf2"
+	"golang.org/x/crypto/argon2"
 )
 
-func Encrypt (source string, password []byte) {
-	if _, err := os.Stat(source); os.IsNotExist(err) {
-		panic(err.Error())
+func Encrypt(dst io.Writer, src io.Reader, password []byte, config *Config) error {
+	if config == nil {
+		config = DefaultConfig
 	}
 
-	srcFile, err := os.Open(source)
-	if err != nil {
-		panic (err.Error())
+	salt := make([]byte, config.SaltLen)
+	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
+		return err
 	}
 
-	defer srcFile.Close()
-
-	plaintext, err := io.ReadAll(srcFile)
-	if err != nil {
-		panic (err.Error())
-	}
-	key := password
-
-	nonce := make([]byte, 12)
+	nonce := make([]byte, nonceSize)
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		panic (err.Error())
+		return err
 	}
 
-	dk := pbkdf2.Key(key, nonce, 4096, 32, sha1.New)
+	key := argon2.IDKey(password, salt, config.Time, config.Memory, config.Threads, config.KeyLen)
 
-	block, err := aes.NewCipher(dk)
+	block, err := aes.NewCipher(key)
 	if err != nil {
-		panic (err.Error())
+		return err
 	}
 
 	aesgcm, err := cipher.NewGCM(block)
 	if err != nil {
-		panic (err.Error())
+		return err
+	}
+
+	if err := writeHeader(dst, salt, nonce, config); err != nil {
+		return err
+	}
+
+	plaintext, err := io.ReadAll(src)
+	if err != nil {
+		return err
 	}
 
 	ciphertext := aesgcm.Seal(nil, nonce, plaintext, nil)
-	ciphertext = append(ciphertext, nonce...)
-
-	dstFile, err := os.Create(source)
-	if err != nil {
-		panic (err.Error())
-	}
-	defer dstFile.Close()
-
-	_, err = dstFile.Write(ciphertext)
-	if err != nil {
-		panic (err.Error())
+	if _, err := dst.Write(ciphertext); err != nil {
+		return err
 	}
 
-} 
+	return nil
+}
 
-func Decrypt(source string, password []byte) {
-
-	if _, err := os.Stat(source); os.IsNotExist(err) {
-		panic(err.Error())
+func Decrypt(dst io.Writer, src io.Reader, password []byte) error {
+	h, err := readHeader(src)
+	if err != nil {
+		return err
 	}
 
-	ciphertext, err := ioutil.ReadFile(source)
-
-	if err != nil {
-		panic(err.Error())
+	config := &Config{
+		SaltLen: len(h.Salt),
+		Time:    h.Time,
+		Memory:  h.Memory,
+		Threads: h.Threads,
+		KeyLen:  h.KeyLen,
 	}
 
-	key := password
-	salt := ciphertext[len(ciphertext)-12:]
-	str := hex.EncodeToString(salt)
+	key := argon2.IDKey(password, h.Salt, config.Time, config.Memory, config.Threads, config.KeyLen)
 
-	nonce, err := hex.DecodeString(str)
-
-	dk := pbkdf2.Key(key, nonce, 4096, 32, sha1.New)
-
-	block, err := aes.NewCipher(dk)
+	block, err := aes.NewCipher(key)
 	if err != nil {
-		panic(err.Error())
+		return err
 	}
 
 	aesgcm, err := cipher.NewGCM(block)
 	if err != nil {
-		panic(err.Error())
+		return err
 	}
 
-	plaintext, err := aesgcm.Open(nil, nonce, ciphertext[:len(ciphertext)-12], nil)
+	ciphertext, err := io.ReadAll(src)
 	if err != nil {
-		panic(err.Error())
+		return err
 	}
 
-	f, err := os.Create(source)
+	plaintext, err := aesgcm.Open(nil, h.Nonce[:], ciphertext, nil)
 	if err != nil {
-		panic(err.Error())
+		return errors.New("cipherlock: decryption failed — wrong password or corrupted data")
 	}
-	_, err = io.Copy(f, bytes.NewReader(plaintext))
-	if err != nil {
-		panic(err.Error())
+
+	if _, err := dst.Write(plaintext); err != nil {
+		return err
 	}
+
+	return nil
 }
