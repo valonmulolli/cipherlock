@@ -107,9 +107,9 @@ plaintext to stdout.`,
 			if err != nil {
 				return err
 			}
-			defer srcFile.Close()
 
 			err = decryptFromReader(destFile, srcFile, password)
+			srcFile.Close()
 			destFile.Close()
 			if err != nil {
 				os.Remove(tmp)
@@ -119,6 +119,10 @@ plaintext to stdout.`,
 				return err
 			}
 
+			if err := cipherlock.Shred(source); err != nil {
+				os.Remove(tmp)
+				return err
+			}
 			return os.Rename(tmp, source)
 		}
 

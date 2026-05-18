@@ -127,7 +127,6 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 		if err != nil {
 			return err
 		}
-		defer srcFile.Close()
 
 		if inPlace {
 			tmp := source + ".tmp"
@@ -153,6 +152,7 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			}
 
 			err = encryptToWriter(destWriter, srcFile, password, config)
+			srcFile.Close()
 			destFile.Close()
 			if err != nil {
 				os.Remove(tmp)
@@ -160,6 +160,10 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			}
 			bar.Finish()
 
+			if err := cipherlock.Shred(source); err != nil {
+				os.Remove(tmp)
+				return err
+			}
 			return os.Rename(tmp, source)
 		}
 
