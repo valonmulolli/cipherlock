@@ -1,0 +1,5 @@
+/cipherlock
+*.tmp
+*.encrypted
+*.decrypted
+*.cipherlock
