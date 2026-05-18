@@ -20,6 +20,7 @@ var (
 	outputPath  string
 	genPassword bool
 	armorMode   bool
+	keyFilePath string
 )
 
 var encryptCmd = &cobra.Command{
@@ -42,7 +43,12 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 		var password []byte
 		var err error
 
-		if genPassword {
+		if keyFilePath != "" {
+			password, err = os.ReadFile(keyFilePath)
+			if err != nil {
+				return fmt.Errorf("reading key file: %w", err)
+			}
+		} else if genPassword {
 			pwd, err := generatePassword(32)
 			if err != nil {
 				return err
@@ -211,6 +217,7 @@ func init() {
 	encryptCmd.Flags().StringVarP(&outputPath, "output", "o", "", "output file path")
 	encryptCmd.Flags().BoolVar(&genPassword, "gen-password", false, "generate a random password and print it to stderr")
 	encryptCmd.Flags().BoolVar(&armorMode, "armor", false, "encode output in base64 ASCII-armor format")
+	encryptCmd.Flags().StringVar(&keyFilePath, "key-file", "", "read password from file instead of prompting")
 }
 
 type ioWriteCloser struct {

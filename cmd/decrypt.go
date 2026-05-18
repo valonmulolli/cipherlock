@@ -15,7 +15,10 @@ import (
 	"golang.org/x/term"
 )
 
-var decryptOutput string
+var (
+	decryptOutput   string
+	decryptKeyFile  string
+)
 
 var decryptCmd = &cobra.Command{
 	Use:   "decrypt [flags] <path>",
@@ -35,11 +38,20 @@ plaintext to stdout.`,
 		source := args[0]
 		out := decryptOutput
 
-		fmt.Fprint(os.Stderr, "Enter password: ")
-		password, err := term.ReadPassword(int(os.Stdin.Fd()))
-		fmt.Fprintln(os.Stderr)
-		if err != nil {
-			return err
+		var password []byte
+		var err error
+		if decryptKeyFile != "" {
+			password, err = os.ReadFile(decryptKeyFile)
+			if err != nil {
+				return fmt.Errorf("reading key file: %w", err)
+			}
+		} else {
+			fmt.Fprint(os.Stderr, "Enter password: ")
+			password, err = term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Fprintln(os.Stderr)
+			if err != nil {
+				return err
+			}
 		}
 
 		if source == "-" {
@@ -207,4 +219,5 @@ func defaultDecryptPath(source string) string {
 func init() {
 	rootCmd.AddCommand(decryptCmd)
 	decryptCmd.Flags().StringVarP(&decryptOutput, "output", "o", "", "output file path")
+	decryptCmd.Flags().StringVar(&decryptKeyFile, "key-file", "", "read password from file instead of prompting")
 }
