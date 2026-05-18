@@ -17,6 +17,8 @@ const (
 
 var (
 	ErrNotArmored = errors.New("cipherlock: not an armored file")
+
+	MagicArmorHeader = []byte(armorHeader)
 )
 
 func Armor(w io.Writer, data []byte) error {
@@ -95,4 +97,14 @@ func IsArmored(data []byte) bool {
 		return false
 	}
 	return strings.TrimRight(lines[0], "\r\n\t ") == armorHeader
+}
+
+func IsArmoredReader(r io.Reader) (bool, io.Reader, error) {
+	var buf bytes.Buffer
+	_, err := io.CopyN(&buf, r, int64(len(MagicArmorHeader)))
+	if err != nil && err != io.EOF {
+		return false, nil, err
+	}
+	combined := io.MultiReader(&buf, r)
+	return IsArmored(buf.Bytes()), combined, nil
 }

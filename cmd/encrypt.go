@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -18,6 +19,7 @@ import (
 var (
 	outputPath  string
 	genPassword bool
+	armorMode   bool
 )
 
 var encryptCmd = &cobra.Command{
@@ -54,6 +56,10 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			}
 		}
 
+		if armorMode && len(password) == 0 {
+			return errors.New("password cannot be empty in armor mode")
+		}
+
 		config := cipherlock.DefaultConfig
 
 		out := outputPath
@@ -81,7 +87,7 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			}
 
 			if out == "" {
-				err = cipherlock.Encrypt(os.Stdout, os.Stdin, password, config)
+				err = encryptToWriter(os.Stdout, os.Stdin, password, config)
 				if bar != nil {
 					bar.Finish()
 				}
@@ -94,7 +100,7 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			}
 			defer f.Close()
 
-			err = cipherlock.Encrypt(f, os.Stdin, password, config)
+			err = encryptToWriter(f, os.Stdin, password, config)
 			if bar != nil {
 				bar.Finish()
 			}
@@ -146,7 +152,7 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 				destWriter = ioWriteCloser{Writer: destFile, Closer: destFile}
 			}
 
-			err = cipherlock.Encrypt(destWriter, srcFile, password, config)
+			err = encryptToWriter(destWriter, srcFile, password, config)
 			destFile.Close()
 			if err != nil {
 				os.Remove(tmp)
@@ -181,14 +187,26 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			destWriter = ioWriteCloser{Writer: destFile, Closer: destFile}
 		}
 
-		return cipherlock.Encrypt(destWriter, srcFile, password, config)
+		return encryptToWriter(destWriter, srcFile, password, config)
 	},
+}
+
+func encryptToWriter(w io.Writer, r io.Reader, password []byte, config *cipherlock.Config) error {
+	if !armorMode {
+		return cipherlock.Encrypt(w, r, password, config)
+	}
+	var buf bytes.Buffer
+	if err := cipherlock.Encrypt(&buf, r, password, config); err != nil {
+		return err
+	}
+	return cipherlock.Armor(w, buf.Bytes())
 }
 
 func init() {
 	rootCmd.AddCommand(encryptCmd)
 	encryptCmd.Flags().StringVarP(&outputPath, "output", "o", "", "output file path")
 	encryptCmd.Flags().BoolVar(&genPassword, "gen-password", false, "generate a random password and print it to stderr")
+	encryptCmd.Flags().BoolVar(&armorMode, "armor", false, "encode output in base64 ASCII-armor format")
 }
 
 type ioWriteCloser struct {

@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -59,7 +61,7 @@ plaintext to stdout.`,
 			}
 
 			if out == "" {
-				err = cipherlock.Decrypt(os.Stdout, os.Stdin, password)
+				err = decryptFromReader(os.Stdout, os.Stdin, password)
 				if bar != nil {
 					bar.Finish()
 				}
@@ -75,7 +77,7 @@ plaintext to stdout.`,
 			}
 			defer f.Close()
 
-			err = cipherlock.Decrypt(f, os.Stdin, password)
+			err = decryptFromReader(f, os.Stdin, password)
 			if bar != nil {
 				bar.Finish()
 			}
@@ -107,7 +109,7 @@ plaintext to stdout.`,
 			}
 			defer srcFile.Close()
 
-			err = cipherlock.Decrypt(destFile, srcFile, password)
+			err = decryptFromReader(destFile, srcFile, password)
 			destFile.Close()
 			if err != nil {
 				os.Remove(tmp)
@@ -147,9 +149,9 @@ plaintext to stdout.`,
 
 		srcReader := progressbar.NewReader(srcFile, bar)
 		if info.Size() == 0 {
-			err = cipherlock.Decrypt(destFile, srcFile, password)
+			err = decryptFromReader(destFile, srcFile, password)
 		} else {
-			err = cipherlock.Decrypt(destFile, &srcReader, password)
+			err = decryptFromReader(destFile, &srcReader, password)
 		}
 		if err != nil {
 			os.Remove(out)
@@ -161,6 +163,27 @@ plaintext to stdout.`,
 
 		return nil
 	},
+}
+
+func decryptFromReader(w io.Writer, r io.Reader, password []byte) error {
+	ok, reader, err := cipherlock.IsArmoredReader(r)
+	if err != nil {
+		return err
+	}
+
+	if ok {
+		data, err := io.ReadAll(reader)
+		if err != nil {
+			return err
+		}
+		decoded, err := cipherlock.UnarmorBytes(data)
+		if err != nil {
+			return err
+		}
+		return cipherlock.Decrypt(w, bytes.NewReader(decoded), password)
+	}
+
+	return cipherlock.Decrypt(w, reader, password)
 }
 
 func isAuthError(err error) bool {
