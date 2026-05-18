@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/valonmulolli/file-encryption/cipherlock"
+	"github.com/valonmulolli/cipherlock/cipherlock"
 
 	"golang.org/x/crypto/ssh/terminal"
 )

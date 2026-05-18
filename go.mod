@@ -1,4 +1,4 @@
-module github.com/valonmulolli/file-encryption
+module github.com/valonmulolli/cipherlock
 
 go 1.20
 
