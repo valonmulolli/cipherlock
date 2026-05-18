@@ -11,21 +11,29 @@ var magic = [4]byte{'C', 'V', '2', 0}
 var ErrInvalidFormat = errors.New("cipherlock: invalid file format")
 var ErrVersionMismatch = errors.New("cipherlock: unsupported version")
 
-const formatVersion byte = 0x02
-const nonceSize = 12
+const (
+	formatVersionV2 byte = 0x02
+	formatVersion   byte = 0x03
+	nonceSize             = 12
+	checksumSize          = 32
+
+	flagChecksum byte = 1 << 0
+)
 
 type header struct {
-	Magic   [4]byte
-	Version byte
-	Salt    []byte
-	Time    uint32
-	Memory  uint32
-	Threads uint8
-	KeyLen  uint32
-	Nonce   [nonceSize]byte
+	Magic    [4]byte
+	Version  byte
+	Flags    byte
+	Salt     []byte
+	Time     uint32
+	Memory   uint32
+	Threads  uint8
+	KeyLen   uint32
+	Nonce    [nonceSize]byte
+	Checksum []byte
 }
 
-func writeHeader(w io.Writer, salt []byte, nonce []byte, config *Config) error {
+func writeHeader(w io.Writer, salt []byte, nonce []byte, checksum []byte, config *Config) error {
 	var err error
 	write := func(data any) {
 		if err != nil {
@@ -36,6 +44,13 @@ func writeHeader(w io.Writer, salt []byte, nonce []byte, config *Config) error {
 
 	write(magic)
 	write(formatVersion)
+
+	var flags byte
+	if config.Checksum {
+		flags |= flagChecksum
+	}
+	write(flags)
+
 	write(uint16(len(salt)))
 	write(salt)
 	write(config.Time)
@@ -43,6 +58,10 @@ func writeHeader(w io.Writer, salt []byte, nonce []byte, config *Config) error {
 	write(config.Threads)
 	write(config.KeyLen)
 	write(nonce)
+
+	if config.Checksum && checksum != nil {
+		write(checksum)
+	}
 
 	return err
 }
@@ -60,7 +79,15 @@ func readHeader(r io.Reader) (header, error) {
 	if err := binary.Read(r, binary.LittleEndian, &h.Version); err != nil {
 		return h, ErrInvalidFormat
 	}
-	if h.Version != formatVersion {
+
+	switch h.Version {
+	case formatVersion: // 0x03 with flags byte
+		if err := binary.Read(r, binary.LittleEndian, &h.Flags); err != nil {
+			return h, ErrInvalidFormat
+		}
+	case formatVersionV2: // 0x02 without flags byte
+		h.Flags = 0
+	default:
 		return h, ErrVersionMismatch
 	}
 
@@ -88,6 +115,13 @@ func readHeader(r io.Reader) (header, error) {
 	}
 	if err := binary.Read(r, binary.LittleEndian, &h.Nonce); err != nil {
 		return h, ErrInvalidFormat
+	}
+
+	if h.Flags&flagChecksum != 0 {
+		h.Checksum = make([]byte, checksumSize)
+		if _, err := io.ReadFull(r, h.Checksum); err != nil {
+			return h, ErrInvalidFormat
+		}
 	}
 
 	return h, nil

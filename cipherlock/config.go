@@ -1,11 +1,12 @@
 package cipherlock
 
 type Config struct {
-	SaltLen int
-	Time    uint32
-	Memory  uint32
-	Threads uint8
-	KeyLen  uint32
+	SaltLen  int
+	Time     uint32
+	Memory   uint32
+	Threads  uint8
+	KeyLen   uint32
+	Checksum bool
 }
 
 var DefaultConfig = &Config{

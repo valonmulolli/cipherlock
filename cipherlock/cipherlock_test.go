@@ -145,3 +145,94 @@ func TestInvalidFormat(t *testing.T) {
 		t.Fatal("expected error for invalid format, got nil")
 	}
 }
+
+func TestEncryptDecryptChecksum(t *testing.T) {
+	password := []byte("checksum-test")
+	plaintext := []byte("data with integrity check")
+
+	config := &Config{
+		SaltLen:  16,
+		Time:     3,
+		Memory:   64 * 1024,
+		Threads:  4,
+		KeyLen:   32,
+		Checksum: true,
+	}
+
+	var encrypted bytes.Buffer
+	err := Encrypt(&encrypted, bytes.NewReader(plaintext), password, config)
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+
+	var decrypted bytes.Buffer
+	err = Decrypt(&decrypted, &encrypted, password)
+	if err != nil {
+		t.Fatalf("Decrypt: %v", err)
+	}
+
+	if !bytes.Equal(plaintext, decrypted.Bytes()) {
+		t.Fatalf("round-trip mismatch: got %q, want %q", decrypted.Bytes(), plaintext)
+	}
+}
+
+func TestDecryptChecksumCorrupted(t *testing.T) {
+	password := []byte("checksum-test")
+	plaintext := []byte("tamper me")
+
+	config := &Config{
+		SaltLen:  16,
+		Time:     3,
+		Memory:   64 * 1024,
+		Threads:  4,
+		KeyLen:   32,
+		Checksum: true,
+	}
+
+	var encrypted bytes.Buffer
+	err := Encrypt(&encrypted, bytes.NewReader(plaintext), password, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data := encrypted.Bytes()
+	data[len(data)-5] ^= 0xFF
+
+	var decrypted bytes.Buffer
+	err = Decrypt(&decrypted, bytes.NewReader(data), password)
+	if err == nil {
+		t.Fatal("expected error for tampered data, got nil")
+	}
+}
+
+func TestDecryptV3NoChecksum(t *testing.T) {
+	password := []byte("v3-no-checksum")
+	plaintext := []byte("version 3 without checksum")
+
+	config := &Config{
+		SaltLen:  16,
+		Time:     3,
+		Memory:   64 * 1024,
+		Threads:  4,
+		KeyLen:   32,
+		Checksum: false,
+	}
+
+	var encrypted bytes.Buffer
+	err := Encrypt(&encrypted, bytes.NewReader(plaintext), password, config)
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+
+	var decrypted bytes.Buffer
+	err = Decrypt(&decrypted, &encrypted, password)
+	if err != nil {
+		t.Fatalf("Decrypt: %v", err)
+	}
+
+	if !bytes.Equal(plaintext, decrypted.Bytes()) {
+		t.Fatalf("round-trip mismatch")
+	}
+}
+
+

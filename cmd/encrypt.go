@@ -17,10 +17,11 @@ import (
 )
 
 var (
-	outputPath  string
-	genPassword bool
-	armorMode   bool
-	keyFilePath string
+	outputPath   string
+	genPassword  bool
+	armorMode    bool
+	keyFilePath  string
+	checksumFlag bool
 )
 
 var encryptCmd = &cobra.Command{
@@ -66,7 +67,14 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			return errors.New("password cannot be empty in armor mode")
 		}
 
-		config := cipherlock.DefaultConfig
+		config := &cipherlock.Config{
+			SaltLen:  cipherlock.DefaultConfig.SaltLen,
+			Time:     cipherlock.DefaultConfig.Time,
+			Memory:   cipherlock.DefaultConfig.Memory,
+			Threads:  cipherlock.DefaultConfig.Threads,
+			KeyLen:   cipherlock.DefaultConfig.KeyLen,
+			Checksum: checksumFlag,
+		}
 
 		out := outputPath
 		destIsSet := out != ""
@@ -218,6 +226,7 @@ func init() {
 	encryptCmd.Flags().BoolVar(&genPassword, "gen-password", false, "generate a random password and print it to stderr")
 	encryptCmd.Flags().BoolVar(&armorMode, "armor", false, "encode output in base64 ASCII-armor format")
 	encryptCmd.Flags().StringVar(&keyFilePath, "key-file", "", "read password from file instead of prompting")
+	encryptCmd.Flags().BoolVar(&checksumFlag, "checksum", false, "embed SHA-256 checksum of plaintext and verify on decrypt")
 }
 
 type ioWriteCloser struct {

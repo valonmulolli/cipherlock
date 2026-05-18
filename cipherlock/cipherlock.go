@@ -1,9 +1,11 @@
 package cipherlock
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"io"
 
@@ -37,12 +39,18 @@ func Encrypt(dst io.Writer, src io.Reader, password []byte, config *Config) erro
 		return err
 	}
 
-	if err := writeHeader(dst, salt, nonce, config); err != nil {
+	plaintext, err := io.ReadAll(src)
+	if err != nil {
 		return err
 	}
 
-	plaintext, err := io.ReadAll(src)
-	if err != nil {
+	var checksum []byte
+	if config.Checksum {
+		h := sha256.Sum256(plaintext)
+		checksum = h[:]
+	}
+
+	if err := writeHeader(dst, salt, nonce, checksum, config); err != nil {
 		return err
 	}
 
@@ -61,11 +69,12 @@ func Decrypt(dst io.Writer, src io.Reader, password []byte) error {
 	}
 
 	config := &Config{
-		SaltLen: len(h.Salt),
-		Time:    h.Time,
-		Memory:  h.Memory,
-		Threads: h.Threads,
-		KeyLen:  h.KeyLen,
+		SaltLen:  len(h.Salt),
+		Time:     h.Time,
+		Memory:   h.Memory,
+		Threads:  h.Threads,
+		KeyLen:   h.KeyLen,
+		Checksum: h.Flags&flagChecksum != 0,
 	}
 
 	key := argon2.IDKey(password, h.Salt, config.Time, config.Memory, config.Threads, config.KeyLen)
@@ -87,7 +96,17 @@ func Decrypt(dst io.Writer, src io.Reader, password []byte) error {
 
 	plaintext, err := aesgcm.Open(nil, h.Nonce[:], ciphertext, nil)
 	if err != nil {
-		return errors.New("cipherlock: decryption failed — wrong password or corrupted data")
+		return errors.New("cipherlock: decryption failed - wrong password or corrupted data")
+	}
+
+	if config.Checksum {
+		if h.Checksum == nil || len(h.Checksum) != checksumSize {
+			return errors.New("cipherlock: corrupted data - missing checksum")
+		}
+		actual := sha256.Sum256(plaintext)
+		if !bytes.Equal(h.Checksum, actual[:]) {
+			return errors.New("cipherlock: checksum mismatch - file is corrupted or tampered")
+		}
 	}
 
 	if _, err := dst.Write(plaintext); err != nil {
