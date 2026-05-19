@@ -21,6 +21,9 @@ cipherlock is a Go library and CLI tool for encrypting files and directories usi
 - **Shell completion**: Generate completion scripts for bash, zsh, fish, and powershell.
 - **V1 backward compatibility**: Decrypt files created with the original PBKDF2+SHA1 format.
 - **Progress indication**: Visual progress bar for large file operations.
+- **Checksum verification**: Embedded SHA-256 checksum of plaintext. Verified automatically on decrypt when present.
+- **Re-key files**: Change the password on an encrypted file without decrypting to disk.
+- **Multi-recipient encryption**: Encrypt once for multiple passwords. Each recipient uses their own password to decrypt.
 - **Library + CLI dual use**: Importable Go package with a full-featured command-line interface built with Cobra.
 
 ## Usage
@@ -87,6 +90,34 @@ Decrypt auto-detects the armor format -- no special flag required.
     cipherlock decrypt --key-file ~/.keys/myapp.key document.pdf.encrypted
 
 Reads the password from a file instead of prompting interactively. Useful for scripts and automation.
+
+### Multi-recipient encryption
+
+Encrypt a file for multiple recipients. Each recipient can decrypt with their own password:
+
+    cipherlock encrypt --recipient "alice" --recipient "bob" document.pdf
+
+The primary password is prompted interactively (or provided via `--key-file` or `--gen-password`). Additional recipients are added with `--recipient`. All recipients can independently decrypt the file.
+
+### Re-key an encrypted file
+
+Change the password on an encrypted file without decrypting to disk:
+
+    cipherlock rekey document.pdf.encrypted
+
+Prompts for the old and new passwords. Supports `--key-file`, `--new-key-file`, `--output`, and `--in-place` flags.
+
+### Verify checksum
+
+Encrypt with an embedded SHA-256 checksum:
+
+    cipherlock encrypt --checksum document.pdf
+
+On decrypt, the checksum is automatically verified if present:
+
+    cipherlock decrypt document.pdf.encrypted
+
+If the file was tampered with, decrypt reports a checksum mismatch error.
 
 ### Shell completion
 
@@ -204,12 +235,32 @@ Overwrites the file with random data, then zeros, then removes it.
 err := cipherlock.DecryptFileV1("old_file.encrypted", "old_file", password)
 ```
 
+### Re-key an encrypted file
+
+```go
+err := cipherlock.ReKeyFile("old.encrypted", "new.encrypted", oldPassword, newPassword, nil)
+```
+
+### Multi-recipient encryption
+
+```go
+passwords := [][]byte{[]byte("alice"), []byte("bob"), []byte("charlie")}
+var buf bytes.Buffer
+err := cipherlock.EncryptMulti(&buf, someReader, passwords, nil)
+
+var decBuf bytes.Buffer
+err := cipherlock.Decrypt(&decBuf, bytes.NewReader(buf.Bytes()), []byte("bob"))
+```
+
 ## File format
 
-cipherlock uses a self-describing binary format:
+cipherlock uses a self-describing binary format with versioned headers:
+
+### V2/V3 (single-recipient)
 
     4 bytes    Magic: "CV2\0"
-    1 byte     Version: 0x02
+    1 byte     Version: 0x02 or 0x03
+    1 byte     Flags (v0x03 only): bit 0 = checksum present
     2 bytes    Salt length (little-endian)
     N bytes    Argon2id salt
     4 bytes    Argon2 time parameter (little-endian)
@@ -217,9 +268,30 @@ cipherlock uses a self-describing binary format:
     1 byte     Argon2 threads parameter
     4 bytes    Key length (little-endian)
     12 bytes   AES-GCM nonce
+    [32 bytes  SHA-256 checksum (v0x03 only, present when flags bit 0 set)]
     Variable   Ciphertext + GCM authentication tag (last 16 bytes)
 
-This header enables full parameter recovery during decryption without external configuration.
+### V4 (multi-recipient)
+
+    4 bytes    Magic: "CV2\0"
+    1 byte     Version: 0x04
+    1 byte     Flags: bit 0 = checksum present
+    4 bytes    Number of recipients (little-endian)
+    For each recipient:
+      2 bytes  Salt length (little-endian)
+      N bytes  Argon2id salt
+      4 bytes  Time parameter (little-endian)
+      4 bytes  Memory parameter (little-endian)
+      1 byte   Threads
+      4 bytes  Key length (little-endian)
+      12 bytes Nonce for key encryption
+      2 bytes  Sealed key length (little-endian)
+      M bytes  Encrypted file key + GCM tag
+    12 bytes   File nonce
+    [32 bytes  SHA-256 checksum (when flags bit 0 set)]
+    Variable   Ciphertext + GCM authentication tag (last 16 bytes)
+
+The ciphertext is encrypted with a random file key, which is then encrypted once per recipient. Each recipient independently derives their own key with Argon2id to decrypt the file key.
 
 ### ASCII-armor format
 
