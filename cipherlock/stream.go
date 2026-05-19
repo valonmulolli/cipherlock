@@ -27,10 +27,10 @@ type streamHeader struct {
 	FileMeta  *FileMeta
 }
 
-func writeStreamHeader(w io.Writer, password []byte, config *Config) (salt []byte, key []byte, err error) {
-	salt = make([]byte, config.SaltLen)
+func writeStreamHeader(w io.Writer, password []byte, config *Config) (key []byte, err error) {
+	salt := make([]byte, config.SaltLen)
 	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	key = argon2.IDKey(password, salt, config.Time, config.Memory, config.Threads, config.KeyLen)
@@ -54,7 +54,7 @@ func writeStreamHeader(w io.Writer, password []byte, config *Config) (salt []byt
 	write(uint16(len(salt)))
 	_, err = w.Write(salt)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	write(config.Time)
 	write(config.Memory)
@@ -68,7 +68,7 @@ func writeStreamHeader(w io.Writer, password []byte, config *Config) (salt []byt
 		write(uint16(len(name)))
 		_, err = w.Write(name)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		write(config.FileMeta.Size)
 		write(config.FileMeta.ModTime.UnixNano())
@@ -76,7 +76,7 @@ func writeStreamHeader(w io.Writer, password []byte, config *Config) (salt []byt
 		write(byte(0))
 	}
 
-	return salt, key, err
+	return key, err
 }
 
 func readStreamHeader(r io.Reader, password []byte) (sh streamHeader, key []byte, err error) {
@@ -235,11 +235,10 @@ func EncryptStream(dst io.Writer, src io.Reader, password []byte, config *Config
 		hasher = sha256.New()
 	}
 
-	salt, key, err := writeStreamHeader(dst, password, config)
+	key, err := writeStreamHeader(dst, password, config)
 	if err != nil {
 		return err
 	}
-	_ = salt
 
 	if err := encryptStream(dst, src, key, chunkSize, hasher); err != nil {
 		return err
@@ -281,11 +280,9 @@ func ReadStreamMeta(src io.Reader) (*FileMeta, error) {
 		return nil, nil
 	}
 
-	var flags byte
-	if err := binary.Read(src, binary.LittleEndian, &flags); err != nil {
+	if _, err := io.CopyN(io.Discard, src, 1); err != nil {
 		return nil, ErrInvalidFormat
 	}
-	_ = flags
 
 	var saltLen uint16
 	if err := binary.Read(src, binary.LittleEndian, &saltLen); err != nil {
@@ -297,27 +294,10 @@ func ReadStreamMeta(src io.Reader) (*FileMeta, error) {
 		return nil, ErrInvalidFormat
 	}
 
-	var argTime, argMemory, argKeyLen uint32
-	var argThreads uint8
-	var argChunkSize uint32
-
-	if err := binary.Read(src, binary.LittleEndian, &argTime); err != nil {
+	// Skip Argon2 parameters (Time=4, Memory=4, Threads=1, KeyLen=4, ChunkSize=4)
+	if _, err := io.CopyN(io.Discard, src, 17); err != nil {
 		return nil, ErrInvalidFormat
 	}
-	if err := binary.Read(src, binary.LittleEndian, &argMemory); err != nil {
-		return nil, ErrInvalidFormat
-	}
-	if err := binary.Read(src, binary.LittleEndian, &argThreads); err != nil {
-		return nil, ErrInvalidFormat
-	}
-	if err := binary.Read(src, binary.LittleEndian, &argKeyLen); err != nil {
-		return nil, ErrInvalidFormat
-	}
-	if err := binary.Read(src, binary.LittleEndian, &argChunkSize); err != nil {
-		return nil, ErrInvalidFormat
-	}
-
-	_, _, _, _, _ = argTime, argMemory, argThreads, argKeyLen, argChunkSize
 
 	var hasMeta byte
 	if err := binary.Read(src, binary.LittleEndian, &hasMeta); err != nil {

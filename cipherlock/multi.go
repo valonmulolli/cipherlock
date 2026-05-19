@@ -172,6 +172,9 @@ func readMultiHeader(r io.Reader) (multiHeader, error) {
 // EncryptMulti encrypts data using multiple passwords, each of which can decrypt independently.
 // It generates a random file key, seals it under each password, and stores all recipient entries
 // in the header. Returns ErrAtLeastOnePassword if no passwords are provided.
+//
+// NOTE: EncryptMulti currently reads the entire src into memory before encrypting.
+// For very large inputs consider using EncryptStream with a single password.
 func EncryptMulti(dst io.Writer, src io.Reader, passwords [][]byte, config *Config) error {
 	if config == nil {
 		config = DefaultConfig

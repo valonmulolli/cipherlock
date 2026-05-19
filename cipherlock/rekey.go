@@ -3,6 +3,7 @@ package cipherlock
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"io"
 	"os"
 )
@@ -32,14 +33,23 @@ func ReKey(dst io.Writer, src io.Reader, oldPassword, newPassword []byte, config
 		go func() {
 			err := DecryptStream(pipeW, fullSrc, oldPassword)
 			pipeW.CloseWithError(err)
+			errCh <- err
 		}()
 
 		go func() {
+			defer pipeR.Close()
 			err := EncryptStream(dst, pipeR, newPassword, config)
 			errCh <- err
 		}()
 
-		return <-errCh
+		// Consume both goroutine errors. Return the one that is
+		// not a broken-pipe cascade error.
+		err1 := <-errCh
+		err2 := <-errCh
+		if err1 != nil && !errors.Is(err1, io.ErrClosedPipe) {
+			return err1
+		}
+		return err2
 	}
 
 	var buf bytes.Buffer

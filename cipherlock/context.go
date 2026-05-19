@@ -7,6 +7,10 @@ import (
 
 // EncryptContext is a context-aware wrapper around Encrypt.
 // It cancels encryption if the context is done before completion.
+//
+// NOTE: Context cancellation does not interrupt an in-progress Argon2id key
+// derivation. The spawned goroutine runs the KDF to completion even after
+// ctx is cancelled. Only the AES-GCM encrypt phase can be cancelled early.
 func EncryptContext(ctx context.Context, dst io.Writer, src io.Reader, password []byte, config *Config) error {
 	done := make(chan error, 1)
 	go func() {
@@ -22,6 +26,10 @@ func EncryptContext(ctx context.Context, dst io.Writer, src io.Reader, password 
 
 // DecryptContext is a context-aware wrapper around Decrypt.
 // It cancels decryption if the context is done before completion.
+//
+// NOTE: Context cancellation does not interrupt an in-progress Argon2id key
+// derivation. The spawned goroutine runs the KDF to completion even after
+// ctx is cancelled.
 func DecryptContext(ctx context.Context, dst io.Writer, src io.Reader, password []byte) error {
 	done := make(chan error, 1)
 	go func() {
@@ -37,6 +45,10 @@ func DecryptContext(ctx context.Context, dst io.Writer, src io.Reader, password 
 
 // EncryptStreamContext is a context-aware wrapper around EncryptStream.
 // It cancels stream encryption if the context is done before completion.
+//
+// NOTE: Context cancellation does not interrupt an in-progress Argon2id key
+// derivation. The spawned goroutine runs the KDF to completion even after
+// ctx is cancelled.
 func EncryptStreamContext(ctx context.Context, dst io.Writer, src io.Reader, password []byte, config *Config) error {
 	done := make(chan error, 1)
 	go func() {
@@ -52,6 +64,10 @@ func EncryptStreamContext(ctx context.Context, dst io.Writer, src io.Reader, pas
 
 // DecryptStreamContext is a context-aware wrapper around DecryptStream.
 // It cancels stream decryption if the context is done before completion.
+//
+// NOTE: Context cancellation does not interrupt an in-progress Argon2id key
+// derivation. The spawned goroutine runs the KDF to completion even after
+// ctx is cancelled.
 func DecryptStreamContext(ctx context.Context, dst io.Writer, src io.Reader, password []byte) error {
 	done := make(chan error, 1)
 	go func() {
@@ -67,6 +83,10 @@ func DecryptStreamContext(ctx context.Context, dst io.Writer, src io.Reader, pas
 
 // EncryptMultiContext is a context-aware wrapper around EncryptMulti.
 // It cancels multi-key encryption if the context is done before completion.
+//
+// NOTE: Context cancellation does not interrupt an in-progress Argon2id key
+// derivation. The spawned goroutine runs the KDF to completion even after
+// ctx is cancelled.
 func EncryptMultiContext(ctx context.Context, dst io.Writer, src io.Reader, passwords [][]byte, config *Config) error {
 	done := make(chan error, 1)
 	go func() {

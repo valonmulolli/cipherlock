@@ -48,6 +48,7 @@ func Shred(path string) error {
 	if err != nil {
 		return err
 	}
+	defer f.Close()
 	remaining = size
 	for remaining > 0 {
 		writeLen := int64(len(zeros))
@@ -55,12 +56,10 @@ func Shred(path string) error {
 			writeLen = remaining
 		}
 		if _, err := f.Write(zeros[:writeLen]); err != nil {
-			f.Close()
 			return err
 		}
 		remaining -= writeLen
 	}
-	f.Close()
 
 	return os.Remove(path)
 }

@@ -12,8 +12,9 @@ import (
 )
 
 // Encrypt encrypts data read from src using password and writes ciphertext to dst.
-// It is a convenience wrapper around EncryptStream. The config parameter controls Argon2 parameters
-// and whether to include a checksum. Returns ErrAuthFailed if authentication fails.
+// It is a convenience wrapper around EncryptStream and always produces the streaming
+// format (v0x05). The config parameter controls Argon2 parameters and whether to
+// include a checksum. Returns ErrAuthFailed if authentication fails.
 func Encrypt(dst io.Writer, src io.Reader, password []byte, config *Config) error {
 	return EncryptStream(dst, src, password, config)
 }
@@ -51,6 +52,8 @@ func Decrypt(dst io.Writer, src io.Reader, password []byte) error {
 	}
 }
 
+// decryptV2V3 handles v0x02 and v0x03 formats.
+// NOTE: loads the entire ciphertext into memory (legacy format).
 func decryptV2V3(dst io.Writer, src io.Reader, password []byte) error {
 	h, err := readHeader(src)
 	if err != nil {
