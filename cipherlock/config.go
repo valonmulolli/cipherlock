@@ -10,6 +10,13 @@ type FileMeta struct {
 	ModTime time.Time
 }
 
+type Profile struct {
+	Time     uint32 `json:"time"`
+	Memory   uint32 `json:"memory"`
+	Threads  uint8  `json:"threads"`
+	Checksum bool   `json:"checksum"`
+}
+
 type Config struct {
 	SaltLen   int
 	Time      uint32
@@ -19,6 +26,22 @@ type Config struct {
 	Checksum  bool
 	ChunkSize int
 	FileMeta  *FileMeta
+}
+
+func (c *Config) ApplyProfile(p *Profile) {
+	if p == nil {
+		return
+	}
+	if p.Time != 0 {
+		c.Time = p.Time
+	}
+	if p.Memory != 0 {
+		c.Memory = p.Memory
+	}
+	if p.Threads != 0 {
+		c.Threads = p.Threads
+	}
+	c.Checksum = p.Checksum
 }
 
 var DefaultConfig = &Config{

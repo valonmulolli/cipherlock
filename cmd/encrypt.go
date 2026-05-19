@@ -23,6 +23,7 @@ var (
 	keyFilePath    string
 	checksumFlag   bool
 	recipientPwds  []string
+	profileName    string
 )
 
 var encryptCmd = &cobra.Command{
@@ -99,6 +100,14 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			Threads:  cipherlock.DefaultConfig.Threads,
 			KeyLen:   cipherlock.DefaultConfig.KeyLen,
 			Checksum: checksumFlag,
+		}
+
+		if profileName != "" {
+			profile, err := lookupProfile(profileName)
+			if err != nil {
+				return err
+			}
+			config.ApplyProfile(profile)
 		}
 
 		if source != "-" {
@@ -241,6 +250,7 @@ func init() {
 	encryptCmd.Flags().StringVar(&keyFilePath, "key-file", "", "read password from file instead of prompting")
 	encryptCmd.Flags().BoolVar(&checksumFlag, "checksum", false, "embed SHA-256 checksum of plaintext and verify on decrypt")
 	encryptCmd.Flags().StringArrayVar(&recipientPwds, "recipient", nil, "additional recipient password (can be specified multiple times)")
+	encryptCmd.Flags().StringVar(&profileName, "profile", "", "use a saved configuration profile")
 }
 
 type ioWriteCloser struct {
