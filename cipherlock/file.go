@@ -1,11 +1,14 @@
 package cipherlock
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
+// EncryptFile encrypts a source file and writes the ciphertext to a destination file.
+// If dest is empty, the source path with a .encrypted suffix is used.
 func EncryptFile(source, dest string, password []byte, config *Config) error {
 	if dest == "" {
 		dest = source + ".encrypted"
@@ -26,6 +29,8 @@ func EncryptFile(source, dest string, password []byte, config *Config) error {
 	return Encrypt(destFile, srcFile, password, config)
 }
 
+// DecryptFile decrypts a source file and writes the plaintext to a destination file.
+// If dest is empty, the .encrypted or .cipherlock suffix is stripped, or .decrypted is appended.
 func DecryptFile(source, dest string, password []byte) error {
 	if dest == "" {
 		dest = defaultDecryptPath(source)
@@ -46,6 +51,8 @@ func DecryptFile(source, dest string, password []byte) error {
 	return Decrypt(destFile, srcFile, password)
 }
 
+// IsEncrypted reports whether the file at path starts with the cipherlock magic bytes.
+// It returns false without error if the file cannot be read or is too short.
 func IsEncrypted(path string) (bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -53,12 +60,11 @@ func IsEncrypted(path string) (bool, error) {
 	}
 	defer f.Close()
 
-	h, err := readHeader(f)
-	if err != nil {
+	var buf [4]byte
+	if _, err := io.ReadFull(f, buf[:]); err != nil {
 		return false, nil
 	}
-
-	return h.Magic == magic, nil
+	return buf == magic, nil
 }
 
 func defaultDecryptPath(source string) string {

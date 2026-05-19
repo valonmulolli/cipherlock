@@ -63,6 +63,7 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 				if err != nil {
 					return err
 				}
+				showStrength(pwd)
 				passwords = append([][]byte{pwd}, passwords...)
 			}
 		} else if keyFilePath != "" {
@@ -86,6 +87,7 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			if err != nil {
 				return err
 			}
+			showStrength(pwd)
 			passwords = [][]byte{pwd}
 		}
 
@@ -144,8 +146,11 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 				bar = nil
 			}
 
+			stopKDF := showKDF()
+
 			if out == "" {
 				err = encryptToWriter(os.Stdout, os.Stdin, passwords, config)
+				stopKDF()
 				if bar != nil {
 					bar.Finish()
 				}
@@ -159,6 +164,7 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			defer f.Close()
 
 			err = encryptToWriter(f, os.Stdin, passwords, config)
+			stopKDF()
 			if bar != nil {
 				bar.Finish()
 			}
@@ -189,6 +195,9 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			return err
 		}
 
+		srcReader := progressReader(srcFile, info.Size(), "encrypting")
+		stopKDF := showKDF()
+
 		if inPlace {
 			tmp := source + ".tmp"
 			destFile, err := os.Create(tmp)
@@ -196,9 +205,10 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 				return err
 			}
 
-			err = encryptToWriter(destFile, srcFile, passwords, config)
+			err = encryptToWriter(destFile, srcReader, passwords, config)
 			srcFile.Close()
 			destFile.Close()
+			stopKDF()
 			if err != nil {
 				os.Remove(tmp)
 				return err
@@ -217,7 +227,9 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 		}
 		defer destFile.Close()
 
-		return encryptToWriter(destFile, srcFile, passwords, config)
+		err = encryptToWriter(destFile, srcReader, passwords, config)
+		stopKDF()
+		return err
 	},
 }
 

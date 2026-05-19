@@ -61,6 +61,7 @@ old encrypted file is lost). Use --output to write to a new path.`,
 			if string(newPwd) != string(confirm) {
 				return errors.New("new passwords do not match")
 			}
+			showStrength(newPwd)
 		}
 
 		dest := rekeyOutput
@@ -74,6 +75,8 @@ old encrypted file is lost). Use --output to write to a new path.`,
 		}
 		defer srcFile.Close()
 
+		stopKDF := showKDF()
+
 		if dest == source || inPlace {
 			tmp := source + ".tmp"
 			destFile, err := os.Create(tmp)
@@ -83,6 +86,7 @@ old encrypted file is lost). Use --output to write to a new path.`,
 
 			err = cipherlock.ReKey(destFile, srcFile, oldPwd, newPwd, nil)
 			destFile.Close()
+			stopKDF()
 			if err != nil {
 				os.Remove(tmp)
 				return err
@@ -101,7 +105,9 @@ old encrypted file is lost). Use --output to write to a new path.`,
 		}
 		defer destFile.Close()
 
-		return cipherlock.ReKey(destFile, srcFile, oldPwd, newPwd, nil)
+		err = cipherlock.ReKey(destFile, srcFile, oldPwd, newPwd, nil)
+		stopKDF()
+		return err
 	},
 }
 

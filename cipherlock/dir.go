@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+// EncryptDir encrypts a directory by tar+gzipping it and encrypting the archive.
+// The result is written to dest (or source+.cipherlock if dest is empty).
 func EncryptDir(source, dest string, password []byte, config *Config) error {
 	source = strings.TrimRight(source, "/\\")
 
@@ -33,6 +35,8 @@ func EncryptDir(source, dest string, password []byte, config *Config) error {
 	return Encrypt(destFile, pipeR, password, config)
 }
 
+// DecryptDir decrypts a cipherlock file containing a tar.gz archive and extracts it.
+// The output directory defaults to source without the .cipherlock or .encrypted suffix.
 func DecryptDir(source, dest string, password []byte) error {
 	if dest == "" {
 		dest = strings.TrimSuffix(source, ".cipherlock")

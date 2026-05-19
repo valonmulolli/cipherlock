@@ -4,65 +4,23 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
-	"errors"
 	"io"
 
 	"golang.org/x/crypto/argon2"
 )
 
+// Encrypt encrypts data read from src using password and writes ciphertext to dst.
+// It is a convenience wrapper around EncryptStream. The config parameter controls Argon2 parameters
+// and whether to include a checksum. Returns ErrAuthFailed if authentication fails.
 func Encrypt(dst io.Writer, src io.Reader, password []byte, config *Config) error {
-	if config == nil {
-		config = DefaultConfig
-	}
-
-	salt := make([]byte, config.SaltLen)
-	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
-		return err
-	}
-
-	nonce := make([]byte, nonceSize)
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return err
-	}
-
-	key := argon2.IDKey(password, salt, config.Time, config.Memory, config.Threads, config.KeyLen)
-
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return err
-	}
-
-	aesgcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return err
-	}
-
-	plaintext, err := io.ReadAll(src)
-	if err != nil {
-		return err
-	}
-
-	var checksum []byte
-	if config.Checksum {
-		h := sha256.Sum256(plaintext)
-		checksum = h[:]
-	}
-
-	if err := writeHeader(dst, salt, nonce, checksum, config); err != nil {
-		return err
-	}
-
-	ciphertext := aesgcm.Seal(nil, nonce, plaintext, nil)
-	if _, err := dst.Write(ciphertext); err != nil {
-		return err
-	}
-
-	return nil
+	return EncryptStream(dst, src, password, config)
 }
 
+// Decrypt decrypts data read from src using password and writes plaintext to dst.
+// It supports all format versions (v2, v3, multi-key, and stream). Returns ErrInvalidFormat,
+// ErrVersionMismatch, ErrAuthFailed, or ErrChecksumMismatch on failure.
 func Decrypt(dst io.Writer, src io.Reader, password []byte) error {
 	var hdrMagic [4]byte
 	if _, err := io.ReadFull(src, hdrMagic[:]); err != nil {
@@ -86,7 +44,8 @@ func Decrypt(dst io.Writer, src io.Reader, password []byte) error {
 		return decryptMulti(dst, multiSrc, password)
 	case formatVersionStream:
 		streamSrc := io.MultiReader(bytes.NewReader([]byte{version}), src)
-		return decryptStream(dst, streamSrc, password)
+		_, streamErr := decryptStream(dst, streamSrc, password)
+		return streamErr
 	default:
 		return ErrVersionMismatch
 	}
@@ -126,16 +85,16 @@ func decryptV2V3(dst io.Writer, src io.Reader, password []byte) error {
 
 	plaintext, err := aesgcm.Open(nil, h.Nonce[:], ciphertext, nil)
 	if err != nil {
-		return errors.New("cipherlock: decryption failed - wrong password or corrupted data")
+		return ErrAuthFailed
 	}
 
 	if config.Checksum {
 		if h.Checksum == nil || len(h.Checksum) != checksumSize {
-			return errors.New("cipherlock: corrupted data - missing checksum")
+			return ErrCorrupted
 		}
 		actual := sha256.Sum256(plaintext)
 		if !bytes.Equal(h.Checksum, actual[:]) {
-			return errors.New("cipherlock: checksum mismatch - file is corrupted or tampered")
+			return ErrChecksumMismatch
 		}
 	}
 

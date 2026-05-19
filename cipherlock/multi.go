@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
-	"errors"
 	"io"
 
 	"golang.org/x/crypto/argon2"
@@ -170,12 +169,15 @@ func readMultiHeader(r io.Reader) (multiHeader, error) {
 	return h, nil
 }
 
+// EncryptMulti encrypts data using multiple passwords, each of which can decrypt independently.
+// It generates a random file key, seals it under each password, and stores all recipient entries
+// in the header. Returns ErrAtLeastOnePassword if no passwords are provided.
 func EncryptMulti(dst io.Writer, src io.Reader, passwords [][]byte, config *Config) error {
 	if config == nil {
 		config = DefaultConfig
 	}
 	if len(passwords) == 0 {
-		return errors.New("cipherlock: at least one password required")
+		return ErrAtLeastOnePassword
 	}
 
 	plaintext, err := io.ReadAll(src)
@@ -282,7 +284,7 @@ func decryptMulti(dst io.Writer, remaining io.Reader, password []byte) error {
 	}
 
 	if fileKey == nil {
-		return errors.New("cipherlock: decryption failed - wrong password or no matching recipient")
+		return ErrAuthFailed
 	}
 
 	ciphertext, err := io.ReadAll(remaining)
@@ -301,16 +303,16 @@ func decryptMulti(dst io.Writer, remaining io.Reader, password []byte) error {
 
 	plaintext, err := gcm.Open(nil, h.FileNonce[:], ciphertext, nil)
 	if err != nil {
-		return errors.New("cipherlock: decryption failed - wrong password or corrupted data")
+		return ErrAuthFailed
 	}
 
 	if h.Flags&flagChecksum != 0 {
 		if len(h.Checksum) != checksumSize {
-			return errors.New("cipherlock: corrupted data - missing checksum")
+			return ErrCorrupted
 		}
 		actual := sha256.Sum256(plaintext)
 		if !bytes.Equal(h.Checksum, actual[:]) {
-			return errors.New("cipherlock: checksum mismatch - file is corrupted or tampered")
+			return ErrChecksumMismatch
 		}
 	}
 

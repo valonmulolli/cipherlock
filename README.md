@@ -25,6 +25,11 @@ cipherlock is a Go library and CLI tool for encrypting files and directories usi
 - **Re-key files**: Change the password on an encrypted file without decrypting to disk.
 - **Multi-recipient encryption**: Encrypt once for multiple passwords. Each recipient uses their own password to decrypt.
 - **Library + CLI dual use**: Importable Go package with a full-featured command-line interface built with Cobra.
+- **Password strength estimation**: Rates password entropy from "very weak" to "very strong" on encrypt/rekey.
+- **Saved config profiles**: Store and reuse Argon2id parameter sets with `config set-profile` / `--profile`.
+- **KDF progress indicator**: "Deriving key..." throbber and file-size progress bars during encrypt/decrypt.
+- **Context-aware library API**: `EncryptContext`, `DecryptContext`, `EncryptStreamContext` — cancel long operations via Go contexts.
+- **Sentinel error types**: `ErrAuthFailed`, `ErrChecksumMismatch`, `ErrCorrupted` — programmatic error handling instead of string matching.
 
 ## Usage
 
@@ -119,6 +124,20 @@ On decrypt, the checksum is automatically verified if present:
 
 If the file was tampered with, decrypt reports a checksum mismatch error.
 
+### Config profiles
+
+Save Argon2id parameter sets for reuse:
+
+    cipherlock config set-profile high --time 4 --memory 262144 --threads 8 --checksum
+    cipherlock encrypt --profile high document.pdf
+
+List and remove profiles:
+
+    cipherlock config list-profiles
+    cipherlock config remove-profile high
+
+Profiles are stored at `~/.config/cipherlock/profiles.json`.
+
 ### Shell completion
 
     cipherlock completion bash > /etc/bash_completion.d/cipherlock
@@ -137,12 +156,14 @@ Import cipherlock in your Go project:
 
     import "github.com/valonmulolli/cipherlock/cipherlock"
 
-### Encrypt data (single-recipient)
+### Encrypt data
 
 ```go
 var buf bytes.Buffer
 err := cipherlock.Encrypt(&buf, someReader, password, nil)
 ```
+
+`Encrypt` now produces the v0x05 streaming format (same as `EncryptStream`). It reads the input in chunks and writes encrypted output incrementally. The entire file is never loaded into memory. For explicit streaming, use `EncryptStream`.
 
 ### Encrypt with metadata (filename, size, modtime)
 
@@ -151,15 +172,6 @@ Metadata is automatically collected from the source file when using the CLI and 
     cipherlock encrypt document.pdf
 
 On decrypt without `--output`, the original filename, size, and modification time are restored automatically.
-
-### Encrypt data (streaming, zero-copy for large files)
-
-```go
-var buf bytes.Buffer
-err := cipherlock.EncryptStream(&buf, someReader, password, nil)
-```
-
-`EncryptStream` reads the input in 64KB chunks and writes encrypted output incrementally. The entire file is never loaded into memory. Recommended for files larger than available RAM.
 
 ### Decrypt data
 
@@ -170,6 +182,38 @@ err := cipherlock.Decrypt(&buf, someReader, password)
 
 `Decrypt` auto-detects all format versions (v0x02, v0x03, v0x04, v0x05) — no special flag needed.
 
+### Context-aware encryption (cancellable)
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+defer cancel()
+
+var buf bytes.Buffer
+err := cipherlock.EncryptContext(ctx, &buf, someReader, password, nil)
+// returns context.DeadlineExceeded if KDF or encryption takes too long
+```
+
+Available context variants: `EncryptContext`, `DecryptContext`, `EncryptStreamContext`, `DecryptStreamContext`, `EncryptMultiContext`.
+
+### Error handling with sentinel errors
+
+```go
+if errors.Is(err, cipherlock.ErrAuthFailed) {
+    // wrong password or corrupted data
+}
+if errors.Is(err, cipherlock.ErrChecksumMismatch) {
+    // file was tampered with
+}
+if errors.Is(err, cipherlock.ErrCorrupted) {
+    // file format is damaged
+}
+if errors.Is(err, cipherlock.ErrInvalidFormat) {
+    // not a cipherlock file
+}
+```
+
+Available sentinel errors: `ErrInvalidFormat`, `ErrVersionMismatch`, `ErrAuthFailed`, `ErrChecksumMismatch`, `ErrCorrupted`, `ErrAtLeastOnePassword`.
+
 ### Read file metadata without decrypting
 
 ```go
@@ -177,7 +221,7 @@ meta, err := cipherlock.ReadStreamMeta(encryptedFile)
 // meta.Name, meta.Size, meta.ModTime (nil if not a v0x05 stream)
 ```
 
-### Encrypt a file
+### Encrypt a file (using EncryptFile)
 
 ```go
 err := cipherlock.EncryptFile("source.txt", "source.txt.encrypted", password, nil)
@@ -321,26 +365,34 @@ The ciphertext is encrypted with a random file key, which is then encrypted once
 
 ### V5 (streaming)
 
-    4 bytes    Magic: "CV2\0"
-    1 byte     Version: 0x05
-    1 byte     Flags: bit 0 = checksum present
-    2 bytes    Salt length (little-endian)
-    N bytes    Argon2id salt
-    4 bytes    Time parameter (little-endian)
-    4 bytes    Memory parameter (little-endian)
-    1 byte     Threads
-    4 bytes    Key length (little-endian)
-    4 bytes    Chunk size (plaintext bytes per chunk)
-    [32 bytes  SHA-256 checksum (trailer, when flags bit 0 set)]
+     4 bytes    Magic: "CV2\0"
+     1 byte     Version: 0x05
+     1 byte     Flags: bit 0 = checksum present
+     2 bytes    Salt length (little-endian)
+     N bytes    Argon2id salt
+     4 bytes    Time parameter (little-endian)
+     4 bytes    Memory parameter (little-endian)
+     1 byte     Threads
+     4 bytes    Key length (little-endian)
+     4 bytes    Chunk size (plaintext bytes per chunk)
+     1 byte     Has metadata (0 = no, 1 = yes)
+     [If has metadata:]
+       2 bytes  Filename length (little-endian)
+       M bytes  Filename (UTF-8)
+       8 bytes  File size (little-endian)
+       8 bytes  Modification time (Unix nanosecond, little-endian)
+     [32 bytes  SHA-256 checksum (trailer, when flags bit 0 set)]
 
-    Zero or more data chunks:
-      12 bytes  Nonce
-      4 bytes   Ciphertext + GCM tag length (little-endian, 0 = end of stream)
-      N bytes   Ciphertext + 16-byte GCM tag
+     Zero or more data chunks:
+       12 bytes  Nonce
+       4 bytes   Ciphertext + GCM tag length (little-endian, 0 = end of stream)
+       N bytes   Ciphertext + 16-byte GCM tag
 
-    End of stream: 4 zero bytes in place of ciphertext length
+     End of stream: 4 zero bytes in place of ciphertext length
 
 The streaming format encrypts data incrementally in fixed-size chunks. Only one chunk is held in memory at a time. Each chunk uses a unique random nonce and is independently authenticated. The checksum (when enabled) is computed incrementally and stored as a trailer.
+
+Metadata (filename, size, modtime) is stored in the cleartext header for zero-cost inspection without decryption. This means anyone with access to the encrypted file can see the original filename and size. A future format version may encrypt the header.
 
 ### ASCII-armor format
 

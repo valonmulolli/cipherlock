@@ -5,6 +5,8 @@ import (
 	"os"
 )
 
+// Shred securely overwrites a file with random data followed by zeros, then removes it.
+// This helps prevent recovery of sensitive data from disk.
 func Shred(path string) error {
 	info, err := os.Stat(path)
 	if err != nil {

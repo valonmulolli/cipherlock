@@ -10,7 +10,9 @@ import (
 )
 
 const (
+	// armorHeader is the header line of the ASCII-armor format.
 	armorHeader = "-----BEGIN CIPHERLOCK-----"
+	// armorFooter is the footer line of the ASCII-armor format.
 	armorFooter = "-----END CIPHERLOCK-----"
 	armorLineLen = 64
 )
@@ -21,6 +23,7 @@ var (
 	MagicArmorHeader = []byte(armorHeader)
 )
 
+// Armor writes data to w in ASCII-armor format (base64 encoded with header/footer lines).
 func Armor(w io.Writer, data []byte) error {
 	if _, err := fmt.Fprintln(w, armorHeader); err != nil {
 		return err
@@ -45,6 +48,7 @@ func Armor(w io.Writer, data []byte) error {
 	return nil
 }
 
+// Unarmor reads ASCII-armor encoded data from r and returns the decoded bytes.
 func Unarmor(r io.Reader) ([]byte, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
@@ -54,6 +58,7 @@ func Unarmor(r io.Reader) ([]byte, error) {
 	return UnarmorBytes(data)
 }
 
+// UnarmorBytes decodes ASCII-armor encoded data and returns the original bytes.
 func UnarmorBytes(data []byte) ([]byte, error) {
 	text := string(data)
 	lines := strings.Split(text, "\n")
@@ -90,6 +95,7 @@ func UnarmorBytes(data []byte) ([]byte, error) {
 	return decoded[:n], nil
 }
 
+// IsArmored reports whether data begins with a cipherlock armor header.
 func IsArmored(data []byte) bool {
 	text := string(data)
 	lines := strings.SplitN(text, "\n", 2)
@@ -99,6 +105,8 @@ func IsArmored(data []byte) bool {
 	return strings.TrimRight(lines[0], "\r\n\t ") == armorHeader
 }
 
+// IsArmoredReader peeks at the reader to determine if the stream starts with an armor header.
+// It returns the result along with a new reader that includes the peeked bytes.
 func IsArmoredReader(r io.Reader) (bool, io.Reader, error) {
 	var buf bytes.Buffer
 	_, err := io.CopyN(&buf, r, int64(len(MagicArmorHeader)))

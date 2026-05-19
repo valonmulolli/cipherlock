@@ -74,8 +74,11 @@ plaintext to stdout.`,
 				bar = nil
 			}
 
+			stopKDF := showKDF()
+
 			if out == "" {
 				err = decryptFromReader(os.Stdout, os.Stdin, password)
+				stopKDF()
 				if bar != nil {
 					bar.Finish()
 				}
@@ -92,6 +95,7 @@ plaintext to stdout.`,
 			defer f.Close()
 
 			err = decryptFromReader(f, os.Stdin, password)
+			stopKDF()
 			if bar != nil {
 				bar.Finish()
 			}
@@ -122,9 +126,13 @@ plaintext to stdout.`,
 				return err
 			}
 
-			err = decryptFromReader(destFile, srcFile, password)
+			srcReader := progressReader(srcFile, info.Size(), "decrypting")
+			stopKDF := showKDF()
+
+			err = decryptFromReader(destFile, srcReader, password)
 			srcFile.Close()
 			destFile.Close()
+			stopKDF()
 			if err != nil {
 				os.Remove(tmp)
 				if isAuthError(err) {
@@ -152,25 +160,15 @@ plaintext to stdout.`,
 		}
 		defer srcFile.Close()
 
-		bar := progressbar.NewOptions64(
-			info.Size(),
-			progressbar.OptionSetDescription("decrypting"),
-			progressbar.OptionSetWriter(os.Stderr),
-			progressbar.OptionShowBytes(true),
-			progressbar.OptionSetWidth(30),
-			progressbar.OptionThrottle(100),
-			progressbar.OptionOnCompletion(func() {
-				fmt.Fprint(os.Stderr, "\n")
-			}),
-		)
-		defer bar.Finish()
+		srcReader := progressReader(srcFile, info.Size(), "decrypting")
+		stopKDF := showKDF()
 
-		srcReader := progressbar.NewReader(srcFile, bar)
 		if info.Size() == 0 {
 			err = decryptFromReader(destFile, srcFile, password)
 		} else {
-			err = decryptFromReader(destFile, &srcReader, password)
+			err = decryptFromReader(destFile, srcReader, password)
 		}
+		stopKDF()
 		if err != nil {
 			os.Remove(out)
 			if isAuthError(err) {
@@ -230,7 +228,7 @@ func restoreMeta(encPath, decPath string, userSetOutput bool) {
 }
 
 func isAuthError(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "decryption failed")
+	return errors.Is(err, cipherlock.ErrAuthFailed)
 }
 
 func defaultDecryptPath(source string) string {

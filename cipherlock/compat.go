@@ -15,6 +15,9 @@ const (
 	v1KeyLen     = 32
 )
 
+// DecryptFileV1 decrypts a v1-format encrypted file using PBKDF2 key derivation.
+// This is provided for backward compatibility with legacy cipherlock files.
+// It returns ErrInvalidFormat if the ciphertext is too short.
 func DecryptFileV1(source, dest string, password []byte) error {
 	ciphertext, err := os.ReadFile(source)
 	if err != nil {

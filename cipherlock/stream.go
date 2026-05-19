@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
-	"errors"
 	"hash"
 	"io"
 	"time"
@@ -217,6 +216,9 @@ func encryptStream(dst io.Writer, src io.Reader, key []byte, chunkSize int, hash
 	return nil
 }
 
+// EncryptStream encrypts src using password with a streaming (chunked) format.
+// It supports large data sizes by processing data in chunks. The config controls Argon2
+// parameters, chunk size, and optional checksumming.
 func EncryptStream(dst io.Writer, src io.Reader, password []byte, config *Config) error {
 	if config == nil {
 		config = DefaultConfig
@@ -226,6 +228,7 @@ func EncryptStream(dst io.Writer, src io.Reader, password []byte, config *Config
 	if chunkSize <= 0 {
 		chunkSize = DefaultChunkSize
 	}
+	config.ChunkSize = chunkSize
 
 	var hasher hash.Hash
 	if config.Checksum {
@@ -252,11 +255,15 @@ func EncryptStream(dst io.Writer, src io.Reader, password []byte, config *Config
 	return nil
 }
 
+// DecryptStream decrypts a stream-format cipherlock file from src and writes plaintext to dst.
+// It is a convenience wrapper around DecryptStreamMeta that discards the FileMeta.
 func DecryptStream(dst io.Writer, src io.Reader, password []byte) error {
 	_, err := DecryptStreamMeta(dst, src, password)
 	return err
 }
 
+// ReadStreamMeta reads the FileMeta from a stream-format cipherlock header without decrypting
+// the data. Returns nil if the file is not in stream format or has no metadata.
 func ReadStreamMeta(src io.Reader) (*FileMeta, error) {
 	var hdrMagic [4]byte
 	if _, err := io.ReadFull(src, hdrMagic[:]); err != nil {
@@ -346,6 +353,8 @@ func ReadStreamMeta(src io.Reader) (*FileMeta, error) {
 	}, nil
 }
 
+// DecryptStreamMeta decrypts a stream-format cipherlock file and returns the FileMeta header.
+// The plaintext is written to dst while the metadata is returned to the caller.
 func DecryptStreamMeta(dst io.Writer, src io.Reader, password []byte) (*FileMeta, error) {
 	var hdrMagic [4]byte
 	if _, err := io.ReadFull(src, hdrMagic[:]); err != nil {
@@ -381,12 +390,16 @@ func decryptStream(dst io.Writer, src io.Reader, password []byte) (*FileMeta, er
 	for {
 		var nonce [nonceSize]byte
 		if _, err := io.ReadFull(src, nonce[:]); err != nil {
-			return nil, errors.New("cipherlock: unexpected end of stream")
+			return nil, ErrCorrupted
 		}
 
 		var ctLen uint32
 		if err := binary.Read(src, binary.LittleEndian, &ctLen); err != nil {
-			return nil, errors.New("cipherlock: unexpected end of stream")
+			return nil, ErrCorrupted
+		}
+
+		if ctLen > uint32(sh.ChunkSize)+16 {
+			return nil, ErrCorrupted
 		}
 
 		if ctLen == 0 {
@@ -395,12 +408,12 @@ func decryptStream(dst io.Writer, src io.Reader, password []byte) (*FileMeta, er
 
 		ciphertext := make([]byte, ctLen)
 		if _, err := io.ReadFull(src, ciphertext); err != nil {
-			return nil, errors.New("cipherlock: corrupted stream data")
+			return nil, ErrCorrupted
 		}
 
 		plaintext, decryptErr := aesgcm.Open(nil, nonce[:], ciphertext, nil)
 		if decryptErr != nil {
-			return nil, errors.New("cipherlock: decryption failed - wrong password or corrupted data")
+			return nil, ErrAuthFailed
 		}
 
 		if hasher != nil {
@@ -415,11 +428,11 @@ func decryptStream(dst io.Writer, src io.Reader, password []byte) (*FileMeta, er
 	if hasher != nil {
 		var expected [checksumSize]byte
 		if _, err := io.ReadFull(src, expected[:]); err != nil {
-			return nil, errors.New("cipherlock: corrupted data - missing checksum")
+			return nil, ErrCorrupted
 		}
 		actual := hasher.Sum(nil)
 		if expected != [32]byte(actual) {
-			return nil, errors.New("cipherlock: checksum mismatch - file is corrupted or tampered")
+			return nil, ErrChecksumMismatch
 		}
 	}
 

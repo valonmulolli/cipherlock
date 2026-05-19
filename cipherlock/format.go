@@ -8,8 +8,19 @@ import (
 
 var magic = [4]byte{'C', 'V', '2', 0}
 
+// ErrInvalidFormat is returned when the input does not contain a valid cipherlock header.
 var ErrInvalidFormat = errors.New("cipherlock: invalid file format")
+// ErrVersionMismatch is returned when the cipherlock format version is not supported.
 var ErrVersionMismatch = errors.New("cipherlock: unsupported version")
+// ErrAuthFailed is returned when decryption authentication fails.
+// This typically indicates an incorrect password or corrupted data.
+var ErrAuthFailed = errors.New("cipherlock: authentication failed")
+// ErrChecksumMismatch is returned when the decrypted data's checksum does not match the stored checksum.
+var ErrChecksumMismatch = errors.New("cipherlock: checksum mismatch")
+// ErrCorrupted is returned when the encrypted data is malformed or incomplete.
+var ErrCorrupted = errors.New("cipherlock: corrupted data")
+// ErrAtLeastOnePassword is returned when no passwords are provided for multi-key encryption.
+var ErrAtLeastOnePassword = errors.New("cipherlock: at least one password required")
 
 const (
 	formatVersionV2 byte = 0x02

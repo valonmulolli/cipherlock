@@ -3,8 +3,8 @@ package cipherlock
 import (
 	"bytes"
 	"crypto/rand"
+	"errors"
 	"io"
-	"strings"
 	"testing"
 )
 
@@ -67,8 +67,8 @@ func TestDecryptWrongPassword(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for wrong password, got nil")
 	}
-	if !strings.Contains(err.Error(), "decryption failed") {
-		t.Fatalf("expected 'decryption failed' error, got: %v", err)
+	if !errors.Is(err, ErrAuthFailed) {
+		t.Fatalf("expected ErrAuthFailed, got: %v", err)
 	}
 }
 
@@ -83,7 +83,7 @@ func TestDecryptCorruptedData(t *testing.T) {
 	}
 
 	corrupted := encrypted.Bytes()
-	corrupted[len(corrupted)-5] ^= 0xFF
+	corrupted[70] ^= 0xFF
 
 	var decrypted bytes.Buffer
 	err = Decrypt(&decrypted, bytes.NewReader(corrupted), password)
