@@ -84,6 +84,9 @@ func Decrypt(dst io.Writer, src io.Reader, password []byte) error {
 	case formatVersionMulti:
 		multiSrc := io.MultiReader(bytes.NewReader([]byte{version}), src)
 		return decryptMulti(dst, multiSrc, password)
+	case formatVersionStream:
+		streamSrc := io.MultiReader(bytes.NewReader([]byte{version}), src)
+		return decryptStream(dst, streamSrc, password)
 	default:
 		return ErrVersionMismatch
 	}

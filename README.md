@@ -11,7 +11,7 @@ cipherlock is a Go library and CLI tool for encrypting files and directories usi
 
 - **Strong encryption**: AES-256-GCM authenticated encryption with 12-byte random nonces.
 - **Memory-hard KDF**: Argon2id key derivation with configurable time, memory, and parallelism parameters. Defaults follow OWASP recommendations (time=3, memory=64MB, threads=4).
-- **Streaming API**: Encrypt and decrypt arbitrary data streams via `io.Reader` and `io.Writer` interfaces.
+- **Streaming encryption**: Reads and encrypts files in 64KB chunks. No upper file size limit — only the current chunk resides in memory.
 - **Directory encryption**: Archive entire directories (tar + gzip) before encryption for atomic encrypted bundles.
 - **Pipe mode**: Encrypt from stdin and write to stdout for seamless shell integration.
 - **Password generation**: Generate cryptographically random passwords with `--gen-password`.
@@ -137,12 +137,21 @@ Import cipherlock in your Go project:
 
     import "github.com/valonmulolli/cipherlock/cipherlock"
 
-### Encrypt data
+### Encrypt data (single-recipient)
 
 ```go
 var buf bytes.Buffer
 err := cipherlock.Encrypt(&buf, someReader, password, nil)
 ```
+
+### Encrypt data (streaming, zero-copy for large files)
+
+```go
+var buf bytes.Buffer
+err := cipherlock.EncryptStream(&buf, someReader, password, nil)
+```
+
+`EncryptStream` reads the input in 64KB chunks and writes encrypted output incrementally. The entire file is never loaded into memory. Recommended for files larger than available RAM.
 
 ### Decrypt data
 
@@ -150,6 +159,8 @@ err := cipherlock.Encrypt(&buf, someReader, password, nil)
 var buf bytes.Buffer
 err := cipherlock.Decrypt(&buf, someReader, password)
 ```
+
+`Decrypt` auto-detects all format versions (v0x02, v0x03, v0x04, v0x05) — no special flag needed.
 
 ### Encrypt a file
 
@@ -292,6 +303,29 @@ cipherlock uses a self-describing binary format with versioned headers:
     Variable   Ciphertext + GCM authentication tag (last 16 bytes)
 
 The ciphertext is encrypted with a random file key, which is then encrypted once per recipient. Each recipient independently derives their own key with Argon2id to decrypt the file key.
+
+### V5 (streaming)
+
+    4 bytes    Magic: "CV2\0"
+    1 byte     Version: 0x05
+    1 byte     Flags: bit 0 = checksum present
+    2 bytes    Salt length (little-endian)
+    N bytes    Argon2id salt
+    4 bytes    Time parameter (little-endian)
+    4 bytes    Memory parameter (little-endian)
+    1 byte     Threads
+    4 bytes    Key length (little-endian)
+    4 bytes    Chunk size (plaintext bytes per chunk)
+    [32 bytes  SHA-256 checksum (trailer, when flags bit 0 set)]
+
+    Zero or more data chunks:
+      12 bytes  Nonce
+      4 bytes   Ciphertext + GCM tag length (little-endian, 0 = end of stream)
+      N bytes   Ciphertext + 16-byte GCM tag
+
+    End of stream: 4 zero bytes in place of ciphertext length
+
+The streaming format encrypts data incrementally in fixed-size chunks. Only one chunk is held in memory at a time. Each chunk uses a unique random nonce and is independently authenticated. The checksum (when enabled) is computed incrementally and stored as a trailer.
 
 ### ASCII-armor format
 

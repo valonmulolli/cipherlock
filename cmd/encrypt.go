@@ -210,7 +210,7 @@ func encryptToWriter(w io.Writer, r io.Reader, passwords [][]byte, config *ciphe
 		}
 	} else {
 		encryptFn = func(dst io.Writer, src io.Reader, pwds [][]byte, cfg *cipherlock.Config) error {
-			return cipherlock.Encrypt(dst, src, pwds[0], cfg)
+			return cipherlock.EncryptStream(dst, src, pwds[0], cfg)
 		}
 	}
 	if !armorMode {
