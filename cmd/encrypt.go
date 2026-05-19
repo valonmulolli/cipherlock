@@ -17,11 +17,12 @@ import (
 )
 
 var (
-	outputPath   string
-	genPassword  bool
-	armorMode    bool
-	keyFilePath  string
-	checksumFlag bool
+	outputPath     string
+	genPassword    bool
+	armorMode      bool
+	keyFilePath    string
+	checksumFlag   bool
+	recipientPwds  []string
 )
 
 var encryptCmd = &cobra.Command{
@@ -41,29 +42,53 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		source := args[0]
-		var password []byte
+		var passwords [][]byte
 		var err error
 
-		if keyFilePath != "" {
-			password, err = os.ReadFile(keyFilePath)
+		if len(recipientPwds) > 0 {
+			for _, r := range recipientPwds {
+				passwords = append(passwords, []byte(r))
+			}
+			if keyFilePath != "" {
+				var pwd []byte
+				pwd, err = os.ReadFile(keyFilePath)
+				if err != nil {
+					return fmt.Errorf("reading key file: %w", err)
+				}
+				passwords = append([][]byte{pwd}, passwords...)
+			} else {
+				var pwd []byte
+				pwd, err = promptPassword("Enter your password: ", true)
+				if err != nil {
+					return err
+				}
+				passwords = append([][]byte{pwd}, passwords...)
+			}
+		} else if keyFilePath != "" {
+			var pwd []byte
+			pwd, err = os.ReadFile(keyFilePath)
 			if err != nil {
 				return fmt.Errorf("reading key file: %w", err)
 			}
+			passwords = [][]byte{pwd}
 		} else if genPassword {
-			pwd, err := generatePassword(32)
+			var pwd []byte
+			pwd, err = generatePassword(32)
 			if err != nil {
 				return err
 			}
 			fmt.Fprintln(os.Stderr, "password:", string(pwd))
-			password = pwd
+			passwords = [][]byte{pwd}
 		} else {
-			password, err = promptPassword("Enter password: ", true)
+			var pwd []byte
+			pwd, err = promptPassword("Enter password: ", true)
 			if err != nil {
 				return err
 			}
+			passwords = [][]byte{pwd}
 		}
 
-		if armorMode && len(password) == 0 {
+		if armorMode && len(recipientPwds) == 0 && len(passwords[0]) == 0 {
 			return errors.New("password cannot be empty in armor mode")
 		}
 
@@ -101,7 +126,7 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			}
 
 			if out == "" {
-				err = encryptToWriter(os.Stdout, os.Stdin, password, config)
+				err = encryptToWriter(os.Stdout, os.Stdin, passwords, config)
 				if bar != nil {
 					bar.Finish()
 				}
@@ -114,7 +139,7 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			}
 			defer f.Close()
 
-			err = encryptToWriter(f, os.Stdin, password, config)
+			err = encryptToWriter(f, os.Stdin, passwords, config)
 			if bar != nil {
 				bar.Finish()
 			}
@@ -127,10 +152,13 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 		}
 
 		if info.IsDir() {
+			if len(passwords) > 1 {
+				return errors.New("multi-recipient encryption not supported for directories")
+			}
 			if !destIsSet {
 				out = source + ".cipherlock"
 			}
-			return cipherlock.EncryptDir(source, out, password, config)
+			return cipherlock.EncryptDir(source, out, passwords[0], config)
 		}
 
 		if !destIsSet {
@@ -149,30 +177,13 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 				return err
 			}
 
-			bar := progressbar.NewOptions64(
-				info.Size(),
-				progressbar.OptionSetDescription("encrypting"),
-				progressbar.OptionSetWriter(os.Stderr),
-				progressbar.OptionShowBytes(true),
-				progressbar.OptionSetWidth(30),
-				progressbar.OptionThrottle(100),
-				progressbar.OptionOnCompletion(func() {
-					fmt.Fprint(os.Stderr, "\n")
-				}),
-			)
-			destWriter := ioWriteCloser{Writer: bar, Closer: destFile}
-			if info.Size() == 0 {
-				destWriter = ioWriteCloser{Writer: destFile, Closer: destFile}
-			}
-
-			err = encryptToWriter(destWriter, srcFile, password, config)
+			err = encryptToWriter(destFile, srcFile, passwords, config)
 			srcFile.Close()
 			destFile.Close()
 			if err != nil {
 				os.Remove(tmp)
 				return err
 			}
-			bar.Finish()
 
 			if err := cipherlock.Shred(source); err != nil {
 				os.Remove(tmp)
@@ -187,34 +198,26 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 		}
 		defer destFile.Close()
 
-		bar := progressbar.NewOptions64(
-			info.Size(),
-			progressbar.OptionSetDescription("encrypting"),
-			progressbar.OptionSetWriter(os.Stderr),
-			progressbar.OptionShowBytes(true),
-			progressbar.OptionSetWidth(30),
-			progressbar.OptionThrottle(100),
-			progressbar.OptionOnCompletion(func() {
-				fmt.Fprint(os.Stderr, "\n")
-			}),
-		)
-		defer bar.Finish()
-
-		destWriter := ioWriteCloser{Writer: bar, Closer: destFile}
-		if info.Size() == 0 {
-			destWriter = ioWriteCloser{Writer: destFile, Closer: destFile}
-		}
-
-		return encryptToWriter(destWriter, srcFile, password, config)
+		return encryptToWriter(destFile, srcFile, passwords, config)
 	},
 }
 
-func encryptToWriter(w io.Writer, r io.Reader, password []byte, config *cipherlock.Config) error {
+func encryptToWriter(w io.Writer, r io.Reader, passwords [][]byte, config *cipherlock.Config) error {
+	var encryptFn func(io.Writer, io.Reader, [][]byte, *cipherlock.Config) error
+	if len(passwords) > 1 {
+		encryptFn = func(dst io.Writer, src io.Reader, pwds [][]byte, cfg *cipherlock.Config) error {
+			return cipherlock.EncryptMulti(dst, src, pwds, cfg)
+		}
+	} else {
+		encryptFn = func(dst io.Writer, src io.Reader, pwds [][]byte, cfg *cipherlock.Config) error {
+			return cipherlock.Encrypt(dst, src, pwds[0], cfg)
+		}
+	}
 	if !armorMode {
-		return cipherlock.Encrypt(w, r, password, config)
+		return encryptFn(w, r, passwords, config)
 	}
 	var buf bytes.Buffer
-	if err := cipherlock.Encrypt(&buf, r, password, config); err != nil {
+	if err := encryptFn(&buf, r, passwords, config); err != nil {
 		return err
 	}
 	return cipherlock.Armor(w, buf.Bytes())
@@ -227,6 +230,7 @@ func init() {
 	encryptCmd.Flags().BoolVar(&armorMode, "armor", false, "encode output in base64 ASCII-armor format")
 	encryptCmd.Flags().StringVar(&keyFilePath, "key-file", "", "read password from file instead of prompting")
 	encryptCmd.Flags().BoolVar(&checksumFlag, "checksum", false, "embed SHA-256 checksum of plaintext and verify on decrypt")
+	encryptCmd.Flags().StringArrayVar(&recipientPwds, "recipient", nil, "additional recipient password (can be specified multiple times)")
 }
 
 type ioWriteCloser struct {

@@ -6,6 +6,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"io"
 
@@ -63,6 +64,32 @@ func Encrypt(dst io.Writer, src io.Reader, password []byte, config *Config) erro
 }
 
 func Decrypt(dst io.Writer, src io.Reader, password []byte) error {
+	var hdrMagic [4]byte
+	if _, err := io.ReadFull(src, hdrMagic[:]); err != nil {
+		return ErrInvalidFormat
+	}
+	if hdrMagic != magic {
+		return ErrInvalidFormat
+	}
+
+	var version byte
+	if err := binary.Read(src, binary.LittleEndian, &version); err != nil {
+		return ErrInvalidFormat
+	}
+
+	switch version {
+	case formatVersionV2, formatVersion:
+		combined := io.MultiReader(bytes.NewReader(append(hdrMagic[:], version)), src)
+		return decryptV2V3(dst, combined, password)
+	case formatVersionMulti:
+		multiSrc := io.MultiReader(bytes.NewReader([]byte{version}), src)
+		return decryptMulti(dst, multiSrc, password)
+	default:
+		return ErrVersionMismatch
+	}
+}
+
+func decryptV2V3(dst io.Writer, src io.Reader, password []byte) error {
 	h, err := readHeader(src)
 	if err != nil {
 		return err
