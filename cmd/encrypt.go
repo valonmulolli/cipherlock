@@ -101,6 +101,16 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			Checksum: checksumFlag,
 		}
 
+		if source != "-" {
+			if st, stErr := os.Stat(source); stErr == nil && !st.IsDir() {
+				config.FileMeta = &cipherlock.FileMeta{
+					Name:    st.Name(),
+					Size:    st.Size(),
+					ModTime: st.ModTime(),
+				}
+			}
+		}
+
 		out := outputPath
 		destIsSet := out != ""
 

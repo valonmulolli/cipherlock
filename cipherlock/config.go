@@ -1,6 +1,14 @@
 package cipherlock
 
+import "time"
+
 const DefaultChunkSize = 64 * 1024
+
+type FileMeta struct {
+	Name    string
+	Size    int64
+	ModTime time.Time
+}
 
 type Config struct {
 	SaltLen   int
@@ -10,6 +18,7 @@ type Config struct {
 	KeyLen    uint32
 	Checksum  bool
 	ChunkSize int
+	FileMeta  *FileMeta
 }
 
 var DefaultConfig = &Config{

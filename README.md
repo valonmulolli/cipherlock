@@ -144,6 +144,14 @@ var buf bytes.Buffer
 err := cipherlock.Encrypt(&buf, someReader, password, nil)
 ```
 
+### Encrypt with metadata (filename, size, modtime)
+
+Metadata is automatically collected from the source file when using the CLI and stored in the v0x05 header:
+
+    cipherlock encrypt document.pdf
+
+On decrypt without `--output`, the original filename, size, and modification time are restored automatically.
+
 ### Encrypt data (streaming, zero-copy for large files)
 
 ```go
@@ -161,6 +169,13 @@ err := cipherlock.Decrypt(&buf, someReader, password)
 ```
 
 `Decrypt` auto-detects all format versions (v0x02, v0x03, v0x04, v0x05) — no special flag needed.
+
+### Read file metadata without decrypting
+
+```go
+meta, err := cipherlock.ReadStreamMeta(encryptedFile)
+// meta.Name, meta.Size, meta.ModTime (nil if not a v0x05 stream)
+```
 
 ### Encrypt a file
 

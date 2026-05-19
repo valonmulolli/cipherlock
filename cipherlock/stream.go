@@ -9,6 +9,7 @@ import (
 	"errors"
 	"hash"
 	"io"
+	"time"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -24,6 +25,7 @@ type streamHeader struct {
 	ChunkSize uint32
 	Flags     byte
 	Checksum  []byte
+	FileMeta  *FileMeta
 }
 
 func writeStreamHeader(w io.Writer, password []byte, config *Config) (salt []byte, key []byte, err error) {
@@ -60,6 +62,20 @@ func writeStreamHeader(w io.Writer, password []byte, config *Config) (salt []byt
 	write(config.Threads)
 	write(config.KeyLen)
 	write(uint32(config.ChunkSize))
+
+	if config.FileMeta != nil {
+		write(byte(1))
+		name := []byte(config.FileMeta.Name)
+		write(uint16(len(name)))
+		_, err = w.Write(name)
+		if err != nil {
+			return nil, nil, err
+		}
+		write(config.FileMeta.Size)
+		write(config.FileMeta.ModTime.UnixNano())
+	} else {
+		write(byte(0))
+	}
 
 	return salt, key, err
 }
@@ -101,6 +117,40 @@ func readStreamHeader(r io.Reader, password []byte) (sh streamHeader, key []byte
 	read(&sh.ChunkSize)
 	if err != nil {
 		return sh, nil, ErrInvalidFormat
+	}
+
+	var hasMeta byte
+	read(&hasMeta)
+	if err != nil {
+		return sh, nil, ErrInvalidFormat
+	}
+
+	if hasMeta != 0 {
+		var nameLen uint16
+		read(&nameLen)
+		if err != nil {
+			return sh, nil, ErrInvalidFormat
+		}
+		nameBytes := make([]byte, nameLen)
+		if _, err = io.ReadFull(r, nameBytes); err != nil {
+			return sh, nil, ErrInvalidFormat
+		}
+
+		var size int64
+		read(&size)
+
+		var modNano int64
+		read(&modNano)
+		if err != nil {
+			return sh, nil, ErrInvalidFormat
+		}
+
+		meta := &FileMeta{
+			Name:    string(nameBytes),
+			Size:    size,
+			ModTime: time.Unix(0, modNano),
+		}
+		sh.FileMeta = meta
 	}
 
 	key = argon2.IDKey(password, sh.Salt, sh.Time, sh.Memory, sh.Threads, sh.KeyLen)
@@ -203,30 +253,124 @@ func EncryptStream(dst io.Writer, src io.Reader, password []byte, config *Config
 }
 
 func DecryptStream(dst io.Writer, src io.Reader, password []byte) error {
+	_, err := DecryptStreamMeta(dst, src, password)
+	return err
+}
+
+func ReadStreamMeta(src io.Reader) (*FileMeta, error) {
 	var hdrMagic [4]byte
 	if _, err := io.ReadFull(src, hdrMagic[:]); err != nil {
-		return ErrInvalidFormat
+		return nil, ErrInvalidFormat
 	}
 	if hdrMagic != magic {
-		return ErrInvalidFormat
+		return nil, ErrInvalidFormat
+	}
+
+	var version byte
+	if err := binary.Read(src, binary.LittleEndian, &version); err != nil {
+		return nil, ErrInvalidFormat
+	}
+	if version != formatVersionStream {
+		return nil, nil
+	}
+
+	var flags byte
+	if err := binary.Read(src, binary.LittleEndian, &flags); err != nil {
+		return nil, ErrInvalidFormat
+	}
+	_ = flags
+
+	var saltLen uint16
+	if err := binary.Read(src, binary.LittleEndian, &saltLen); err != nil {
+		return nil, ErrInvalidFormat
+	}
+
+	salt := make([]byte, saltLen)
+	if _, err := io.ReadFull(src, salt); err != nil {
+		return nil, ErrInvalidFormat
+	}
+
+	var argTime, argMemory, argKeyLen uint32
+	var argThreads uint8
+	var argChunkSize uint32
+
+	if err := binary.Read(src, binary.LittleEndian, &argTime); err != nil {
+		return nil, ErrInvalidFormat
+	}
+	if err := binary.Read(src, binary.LittleEndian, &argMemory); err != nil {
+		return nil, ErrInvalidFormat
+	}
+	if err := binary.Read(src, binary.LittleEndian, &argThreads); err != nil {
+		return nil, ErrInvalidFormat
+	}
+	if err := binary.Read(src, binary.LittleEndian, &argKeyLen); err != nil {
+		return nil, ErrInvalidFormat
+	}
+	if err := binary.Read(src, binary.LittleEndian, &argChunkSize); err != nil {
+		return nil, ErrInvalidFormat
+	}
+
+	_, _, _, _, _ = argTime, argMemory, argThreads, argKeyLen, argChunkSize
+
+	var hasMeta byte
+	if err := binary.Read(src, binary.LittleEndian, &hasMeta); err != nil {
+		return nil, ErrInvalidFormat
+	}
+	if hasMeta == 0 {
+		return nil, nil
+	}
+
+	var nameLen uint16
+	if err := binary.Read(src, binary.LittleEndian, &nameLen); err != nil {
+		return nil, ErrInvalidFormat
+	}
+	nameBytes := make([]byte, nameLen)
+	if _, err := io.ReadFull(src, nameBytes); err != nil {
+		return nil, ErrInvalidFormat
+	}
+
+	var size int64
+	if err := binary.Read(src, binary.LittleEndian, &size); err != nil {
+		return nil, ErrInvalidFormat
+	}
+
+	var modNano int64
+	if err := binary.Read(src, binary.LittleEndian, &modNano); err != nil {
+		return nil, ErrInvalidFormat
+	}
+
+	return &FileMeta{
+		Name:    string(nameBytes),
+		Size:    size,
+		ModTime: time.Unix(0, modNano),
+	}, nil
+}
+
+func DecryptStreamMeta(dst io.Writer, src io.Reader, password []byte) (*FileMeta, error) {
+	var hdrMagic [4]byte
+	if _, err := io.ReadFull(src, hdrMagic[:]); err != nil {
+		return nil, ErrInvalidFormat
+	}
+	if hdrMagic != magic {
+		return nil, ErrInvalidFormat
 	}
 	return decryptStream(dst, src, password)
 }
 
-func decryptStream(dst io.Writer, src io.Reader, password []byte) error {
+func decryptStream(dst io.Writer, src io.Reader, password []byte) (*FileMeta, error) {
 	sh, key, err := readStreamHeader(src, password)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	aesgcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	var hasher hash.Hash
@@ -237,12 +381,12 @@ func decryptStream(dst io.Writer, src io.Reader, password []byte) error {
 	for {
 		var nonce [nonceSize]byte
 		if _, err := io.ReadFull(src, nonce[:]); err != nil {
-			return errors.New("cipherlock: unexpected end of stream")
+			return nil, errors.New("cipherlock: unexpected end of stream")
 		}
 
 		var ctLen uint32
 		if err := binary.Read(src, binary.LittleEndian, &ctLen); err != nil {
-			return errors.New("cipherlock: unexpected end of stream")
+			return nil, errors.New("cipherlock: unexpected end of stream")
 		}
 
 		if ctLen == 0 {
@@ -251,12 +395,12 @@ func decryptStream(dst io.Writer, src io.Reader, password []byte) error {
 
 		ciphertext := make([]byte, ctLen)
 		if _, err := io.ReadFull(src, ciphertext); err != nil {
-			return errors.New("cipherlock: corrupted stream data")
+			return nil, errors.New("cipherlock: corrupted stream data")
 		}
 
 		plaintext, decryptErr := aesgcm.Open(nil, nonce[:], ciphertext, nil)
 		if decryptErr != nil {
-			return errors.New("cipherlock: decryption failed - wrong password or corrupted data")
+			return nil, errors.New("cipherlock: decryption failed - wrong password or corrupted data")
 		}
 
 		if hasher != nil {
@@ -264,20 +408,20 @@ func decryptStream(dst io.Writer, src io.Reader, password []byte) error {
 		}
 
 		if _, err := dst.Write(plaintext); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	if hasher != nil {
 		var expected [checksumSize]byte
 		if _, err := io.ReadFull(src, expected[:]); err != nil {
-			return errors.New("cipherlock: corrupted data - missing checksum")
+			return nil, errors.New("cipherlock: corrupted data - missing checksum")
 		}
 		actual := hasher.Sum(nil)
 		if expected != [32]byte(actual) {
-			return errors.New("cipherlock: checksum mismatch - file is corrupted or tampered")
+			return nil, errors.New("cipherlock: checksum mismatch - file is corrupted or tampered")
 		}
 	}
 
-	return nil
+	return sh.FileMeta, nil
 }

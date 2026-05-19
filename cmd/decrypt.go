@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/schollz/progressbar/v3"
@@ -37,6 +38,7 @@ plaintext to stdout.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		source := args[0]
 		out := decryptOutput
+		userSetOutput := out != ""
 
 		var password []byte
 		var err error
@@ -177,6 +179,7 @@ plaintext to stdout.`,
 			return err
 		}
 
+		restoreMeta(source, out, userSetOutput)
 		return nil
 	},
 }
@@ -200,6 +203,30 @@ func decryptFromReader(w io.Writer, r io.Reader, password []byte) error {
 	}
 
 	return cipherlock.Decrypt(w, reader, password)
+}
+
+func restoreMeta(encPath, decPath string, userSetOutput bool) {
+	encFile, err := os.Open(encPath)
+	if err != nil {
+		return
+	}
+	defer encFile.Close()
+
+	meta, err := cipherlock.ReadStreamMeta(encFile)
+	if err != nil || meta == nil {
+		return
+	}
+
+	if !userSetOutput && meta.Name != "" {
+		dir := filepath.Dir(decPath)
+		restoredName := filepath.Join(dir, meta.Name)
+		if restoredName != decPath {
+			_ = os.Rename(decPath, restoredName)
+			decPath = restoredName
+		}
+	}
+
+	_ = os.Chtimes(decPath, meta.ModTime, meta.ModTime)
 }
 
 func isAuthError(err error) bool {
