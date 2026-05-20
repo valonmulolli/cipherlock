@@ -130,8 +130,8 @@ plaintext to stdout.`,
 			stopKDF := showKDF()
 
 			err = decryptFromReader(destFile, srcReader, password)
-			srcFile.Close()
-			destFile.Close()
+			srcFile.Close() //nolint:errcheck
+			destFile.Close() //nolint:errcheck
 			stopKDF()
 			if err != nil {
 				os.Remove(tmp) //nolint:errcheck
@@ -152,13 +152,13 @@ plaintext to stdout.`,
 		if err != nil {
 			return err
 		}
-		defer destFile.Close()
+		defer destFile.Close() //nolint:errcheck
 
 		srcFile, err := os.Open(source)
 		if err != nil {
 			return err
 		}
-		defer srcFile.Close()
+		defer srcFile.Close() //nolint:errcheck
 
 		srcReader := progressReader(srcFile, info.Size(), "decrypting")
 		stopKDF := showKDF()
@@ -170,7 +170,7 @@ plaintext to stdout.`,
 		}
 		stopKDF()
 		if err != nil {
-			os.Remove(out)
+			os.Remove(out) //nolint:errcheck
 			if isAuthError(err) {
 				return errors.New("decryption failed: wrong password or corrupted data")
 			}

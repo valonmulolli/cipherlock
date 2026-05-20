@@ -41,7 +41,9 @@ func TestReKeyWrongOldPassword(t *testing.T) {
 	newPwd := []byte("new-password")
 
 	var encrypted bytes.Buffer
-	Encrypt(&encrypted, bytes.NewReader([]byte("data")), oldPwd, nil)
+	if err := Encrypt(&encrypted, bytes.NewReader([]byte("data")), oldPwd, nil); err != nil {
+		t.Fatal(err)
+	}
 
 	err := ReKey(&bytes.Buffer{}, &encrypted, wrongPwd, newPwd, nil)
 	if err == nil {
@@ -58,7 +60,9 @@ func TestReKeyFile(t *testing.T) {
 	src := filepath.Join(dir, "secret.enc")
 
 	var buf bytes.Buffer
-	Encrypt(&buf, bytes.NewReader(plaintext), oldPwd, nil)
+	if err := Encrypt(&buf, bytes.NewReader(plaintext), oldPwd, nil); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(src, buf.Bytes(), 0644); err != nil {
 		t.Fatal(err)
 	}

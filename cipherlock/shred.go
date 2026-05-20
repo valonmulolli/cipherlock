@@ -27,7 +27,7 @@ func Shred(path string) error {
 	remaining := size
 	for remaining > 0 {
 		if _, err := rand.Read(random); err != nil {
-			f.Close()
+			f.Close() //nolint:errcheck
 			return err
 		}
 		writeLen := int64(len(random))
@@ -35,13 +35,13 @@ func Shred(path string) error {
 			writeLen = remaining
 		}
 		if _, err := f.Write(random[:writeLen]); err != nil {
-			f.Close()
+			f.Close() //nolint:errcheck
 			return err
 		}
 		remaining -= writeLen
 	}
 
-	f.Close()
+	f.Close() //nolint:errcheck
 
 	zeros := make([]byte, 4096)
 	f, err = os.OpenFile(path, os.O_WRONLY, 0)
