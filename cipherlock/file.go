@@ -18,13 +18,13 @@ func EncryptFile(source, dest string, password []byte, config *Config) error {
 	if err != nil {
 		return err
 	}
-	defer srcFile.Close()
+	defer srcFile.Close() //nolint:errcheck
 
 	destFile, err := os.Create(dest)
 	if err != nil {
 		return err
 	}
-	defer destFile.Close()
+	defer destFile.Close() //nolint:errcheck
 
 	return Encrypt(destFile, srcFile, password, config)
 }
@@ -40,13 +40,13 @@ func DecryptFile(source, dest string, password []byte) error {
 	if err != nil {
 		return err
 	}
-	defer srcFile.Close()
+	defer srcFile.Close() //nolint:errcheck
 
 	destFile, err := os.Create(dest)
 	if err != nil {
 		return err
 	}
-	defer destFile.Close()
+	defer destFile.Close() //nolint:errcheck
 
 	return Decrypt(destFile, srcFile, password)
 }
@@ -58,7 +58,7 @@ func IsEncrypted(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	var buf [4]byte
 	if _, err := io.ReadFull(f, buf[:]); err != nil {

@@ -73,7 +73,9 @@ func TestDecryptFileV1WrongPassword(t *testing.T) {
 
 	dir := t.TempDir()
 	src := filepath.Join(dir, "v1_file")
-	os.WriteFile(src, ciphertext, 0644)
+	if err := os.WriteFile(src, ciphertext, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	err := DecryptFileV1(src, "", wrongPassword)
 	if err == nil {

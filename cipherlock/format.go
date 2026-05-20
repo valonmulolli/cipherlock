@@ -44,39 +44,6 @@ type header struct {
 	Checksum []byte
 }
 
-func writeHeader(w io.Writer, salt []byte, nonce []byte, checksum []byte, config *Config) error {
-	var err error
-	write := func(data any) {
-		if err != nil {
-			return
-		}
-		err = binary.Write(w, binary.LittleEndian, data)
-	}
-
-	write(magic)
-	write(formatVersion)
-
-	var flags byte
-	if config.Checksum {
-		flags |= flagChecksum
-	}
-	write(flags)
-
-	write(uint16(len(salt)))
-	write(salt)
-	write(config.Time)
-	write(config.Memory)
-	write(config.Threads)
-	write(config.KeyLen)
-	write(nonce)
-
-	if config.Checksum && checksum != nil {
-		write(checksum)
-	}
-
-	return err
-}
-
 func readHeader(r io.Reader) (header, error) {
 	var h header
 

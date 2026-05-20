@@ -152,7 +152,7 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 				err = encryptToWriter(os.Stdout, os.Stdin, passwords, config)
 				stopKDF()
 				if bar != nil {
-					bar.Finish()
+				bar.Finish() //nolint:errcheck
 				}
 				return err
 			}
@@ -263,11 +263,6 @@ func init() {
 	encryptCmd.Flags().BoolVar(&checksumFlag, "checksum", false, "embed SHA-256 checksum of plaintext and verify on decrypt")
 	encryptCmd.Flags().StringArrayVar(&recipientPwds, "recipient", nil, "additional recipient password (can be specified multiple times)")
 	encryptCmd.Flags().StringVar(&profileName, "profile", "", "use a saved configuration profile")
-}
-
-type ioWriteCloser struct {
-	io.Writer
-	io.Closer
 }
 
 func generatePassword(length int) ([]byte, error) {

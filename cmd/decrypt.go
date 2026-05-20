@@ -80,7 +80,7 @@ plaintext to stdout.`,
 				err = decryptFromReader(os.Stdout, os.Stdin, password)
 				stopKDF()
 				if bar != nil {
-					bar.Finish()
+					bar.Finish() //nolint:errcheck
 				}
 				if err != nil {
 					return err
@@ -97,7 +97,7 @@ plaintext to stdout.`,
 			err = decryptFromReader(f, os.Stdin, password)
 			stopKDF()
 			if bar != nil {
-				bar.Finish()
+				bar.Finish() //nolint:errcheck
 			}
 			if err != nil {
 				return err
@@ -134,7 +134,7 @@ plaintext to stdout.`,
 			destFile.Close()
 			stopKDF()
 			if err != nil {
-				os.Remove(tmp)
+				os.Remove(tmp) //nolint:errcheck
 				if isAuthError(err) {
 					return errors.New("decryption failed: wrong password or corrupted data")
 				}
@@ -142,7 +142,7 @@ plaintext to stdout.`,
 			}
 
 			if err := cipherlock.Shred(source); err != nil {
-				os.Remove(tmp)
+				os.Remove(tmp) //nolint:errcheck
 				return err
 			}
 			return os.Rename(tmp, source)
@@ -208,7 +208,7 @@ func restoreMeta(encPath, decPath string, userSetOutput bool) {
 	if err != nil {
 		return
 	}
-	defer encFile.Close()
+	defer encFile.Close() //nolint:errcheck
 
 	meta, err := cipherlock.ReadStreamMeta(encFile)
 	if err != nil || meta == nil {

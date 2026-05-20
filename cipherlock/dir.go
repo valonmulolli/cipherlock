@@ -19,7 +19,7 @@ func EncryptDir(source, dest string, password []byte, config *Config) error {
 	}
 
 	pipeR, pipeW := io.Pipe()
-	defer pipeR.Close()
+	defer pipeR.Close() //nolint:errcheck
 
 	go func() {
 		err := tarGzDir(source, pipeW)
@@ -30,7 +30,7 @@ func EncryptDir(source, dest string, password []byte, config *Config) error {
 	if err != nil {
 		return err
 	}
-	defer destFile.Close()
+	defer destFile.Close() //nolint:errcheck
 
 	return Encrypt(destFile, pipeR, password, config)
 }
@@ -44,13 +44,13 @@ func DecryptDir(source, dest string, password []byte) error {
 	}
 
 	pipeR, pipeW := io.Pipe()
-	defer pipeR.Close()
+	defer pipeR.Close() //nolint:errcheck
 
 	srcFile, err := os.Open(source)
 	if err != nil {
 		return err
 	}
-	defer srcFile.Close()
+	defer srcFile.Close() //nolint:errcheck
 
 	go func() {
 		err := Decrypt(pipeW, srcFile, password)
@@ -96,11 +96,11 @@ func tarGzDir(source string, w io.Writer) error {
 			return err
 		}
 		_, err = io.Copy(tw, f)
-		f.Close()
+		f.Close() //nolint:errcheck
 		return err
 	})
 	if err != nil {
-		gw.Close()
+		gw.Close() //nolint:errcheck
 		return err
 	}
 
@@ -115,7 +115,7 @@ func untarGzDir(dest string, r io.Reader) error {
 	if err != nil {
 		return err
 	}
-	defer gr.Close()
+	defer gr.Close() //nolint:errcheck
 
 	tr := tar.NewReader(gr)
 
@@ -144,7 +144,7 @@ func untarGzDir(dest string, r io.Reader) error {
 				return err
 			}
 			_, err = io.Copy(f, tr)
-			f.Close()
+			f.Close() //nolint:errcheck
 			if err != nil {
 				return err
 			}

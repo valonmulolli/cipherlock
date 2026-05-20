@@ -100,10 +100,6 @@ var removeProfileCmd = &cobra.Command{
 	},
 }
 
-func profileConfig(profilesFile string) string {
-	return filepath.Join(profilesFile)
-}
-
 type profileStore struct {
 	Profiles map[string]cipherlock.Profile `json:"profiles"`
 }

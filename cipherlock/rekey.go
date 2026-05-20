@@ -37,7 +37,7 @@ func ReKey(dst io.Writer, src io.Reader, oldPassword, newPassword []byte, config
 		}()
 
 		go func() {
-			defer pipeR.Close()
+			defer pipeR.Close() //nolint:errcheck
 			err := EncryptStream(dst, pipeR, newPassword, config)
 			errCh <- err
 		}()
