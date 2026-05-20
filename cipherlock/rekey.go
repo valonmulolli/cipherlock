@@ -72,13 +72,12 @@ func ReKeyFile(source, dest string, oldPassword, newPassword []byte, config *Con
 	if err != nil {
 		return err
 	}
-	defer srcFile.Close()
-
+	defer srcFile.Close() //nolint:errcheck
 	destFile, err := os.Create(dest)
 	if err != nil {
 		return err
 	}
-	defer destFile.Close()
+	defer destFile.Close() //nolint:errcheck
 
 	return ReKey(destFile, srcFile, oldPassword, newPassword, config)
 }

@@ -1,4 +1,5 @@
-package cipherlock //nolint:errcheck
+//nolint:errcheck
+package cipherlock
 
 import (
 	"bytes"
