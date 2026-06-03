@@ -3,6 +3,7 @@ package cipherlock
 import (
 	"archive/tar"
 	"compress/gzip"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -119,6 +120,22 @@ func untarGzDir(dest string, r io.Reader) error {
 
 	tr := tar.NewReader(gr)
 
+	// Resolve dest to an absolute, symlink-free path so we can check that every
+	// extracted entry stays inside it. This blocks tar-slip attacks where a
+	// header.Name of "../../etc/passwd" or an absolute path tries to write
+	// outside the destination directory.
+	destAbs, err := filepath.Abs(dest)
+	if err != nil {
+		return err
+	}
+	// EvalSymlinks returns "" on error; preserve the absolute path so the
+	// containment check below still works when dest does not exist yet.
+	resolved, err := filepath.EvalSymlinks(destAbs)
+	if err != nil {
+		resolved = destAbs
+	}
+	destAbs = resolved
+
 	for {
 		header, err := tr.Next()
 		if err == io.EOF {
@@ -128,7 +145,25 @@ func untarGzDir(dest string, r io.Reader) error {
 			return err
 		}
 
-		target := filepath.Join(dest, header.Name)
+		// Reject absolute paths and any path that, after cleaning, escapes dest.
+		// We construct the candidate, then resolve symlinks on the parent path
+		// (the leaf may not exist yet) and re-verify containment.
+		cleaned := filepath.Clean(header.Name)
+		if filepath.IsAbs(cleaned) || startsWithDotDot(cleaned) {
+			return fmt.Errorf("cipherlock: refusing unsafe path %q", header.Name)
+		}
+		target := filepath.Join(destAbs, cleaned)
+
+		parent := filepath.Dir(target)
+		resolvedParent, evalErr := filepath.EvalSymlinks(parent)
+		if evalErr != nil {
+			// Parent may not exist yet; fall back to a path that is provably
+			// inside destAbs (parent is built from destAbs + cleaned).
+			resolvedParent = parent
+		}
+		if !pathHasPrefix(resolvedParent, destAbs) {
+			return fmt.Errorf("cipherlock: refusing path %q outside destination", header.Name)
+		}
 
 		switch header.Typeflag {
 		case tar.TypeDir:
@@ -152,4 +187,25 @@ func untarGzDir(dest string, r io.Reader) error {
 	}
 
 	return nil
+}
+
+// startsWithDotDot reports whether a cleaned relative path begins with ".."
+// (i.e. tries to escape its root).
+func startsWithDotDot(cleaned string) bool {
+	if cleaned == ".." {
+		return true
+	}
+	return strings.HasPrefix(cleaned, ".."+string(filepath.Separator))
+}
+
+// pathHasPrefix reports whether abs is the same as or lies under root, after
+// both have been cleaned. Both arguments must be absolute (or at least
+// relative-but-canonical) and use the same separator.
+func pathHasPrefix(abs, root string) bool {
+	abs = filepath.Clean(abs)
+	root = filepath.Clean(root)
+	if abs == root {
+		return true
+	}
+	return strings.HasPrefix(abs, root+string(filepath.Separator))
 }
