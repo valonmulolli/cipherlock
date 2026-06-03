@@ -269,3 +269,45 @@ func TestV07RecipientsPreservedOrder(t *testing.T) {
 		}
 	}
 }
+
+// TestEncryptConcurrent stresses the local-config-copy fix by running N
+// goroutines that each call EncryptStream, EncryptStreamV2, and
+// EncryptStreamMulti against the shared DefaultConfig. With -race this
+// catches any regression of the data race that prompted the cfg := *config
+// copy. Without -race it still validates correctness under contention.
+func TestEncryptConcurrent(t *testing.T) {
+	const goroutines = 8
+	const iterations = 4
+
+	plaintext := bytes.Repeat([]byte("concurrent payload "), 64)
+	passwords := [][]byte{[]byte("alice"), []byte("bob"), []byte("charlie")}
+
+	for i := 0; i < iterations; i++ {
+		done := make(chan error, goroutines*3)
+		for g := 0; g < goroutines; g++ {
+			g := g
+			go func() {
+				var buf bytes.Buffer
+				pwd := []byte("pw-")
+				pwd = append(pwd, byte('A'+g))
+				done <- EncryptStream(&buf, bytes.NewReader(plaintext), pwd, DefaultConfig)
+
+				var buf2 bytes.Buffer
+				done <- EncryptStreamV2(&buf2, bytes.NewReader(plaintext), pwd, DefaultConfig)
+
+				var buf3 bytes.Buffer
+				done <- EncryptStreamMulti(&buf3, bytes.NewReader(plaintext), passwords, DefaultConfig)
+			}()
+		}
+		for k := 0; k < goroutines*3; k++ {
+			if err := <-done; err != nil {
+				t.Fatalf("iteration %d: goroutine failed: %v", i, err)
+			}
+		}
+	}
+
+	// DefaultConfig must not have been mutated by any concurrent caller.
+	if DefaultConfig.ChunkSize == 0 {
+		t.Fatal("DefaultConfig.ChunkSize was clobbered by concurrent encryptions")
+	}
+}
