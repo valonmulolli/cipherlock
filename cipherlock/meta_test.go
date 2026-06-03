@@ -93,12 +93,12 @@ func TestDecryptStreamMetaIgnoresMeta(t *testing.T) {
 	}
 
 	cfg := &Config{
-		SaltLen:   16,
-		Time:      1,
-		Memory:    64 * 1024,
-		Threads:   1,
-		KeyLen:    32,
-		FileMeta:  meta,
+		SaltLen:  16,
+		Time:     1,
+		Memory:   64 * 1024,
+		Threads:  1,
+		KeyLen:   32,
+		FileMeta: meta,
 	}
 
 	var buf bytes.Buffer
@@ -135,11 +135,11 @@ func TestEncryptFileRestoresMeta(t *testing.T) {
 	decPath := filepath.Join(dir, "restored.txt")
 
 	err = EncryptFile(src, encPath, password, &Config{
-		SaltLen:   16,
-		Time:      1,
-		Memory:    64 * 1024,
-		Threads:   1,
-		KeyLen:    32,
+		SaltLen: 16,
+		Time:    1,
+		Memory:  64 * 1024,
+		Threads: 1,
+		KeyLen:  32,
 		FileMeta: &FileMeta{
 			Name:    info.Name(),
 			Size:    info.Size(),

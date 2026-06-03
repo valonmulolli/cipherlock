@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	v1NonceSize = 12
+	v1NonceSize  = 12
 	v1Iterations = 4096
 	v1KeyLen     = 32
 )

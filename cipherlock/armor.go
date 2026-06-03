@@ -13,7 +13,7 @@ const (
 	// armorHeader is the header line of the ASCII-armor format.
 	armorHeader = "-----BEGIN CIPHERLOCK-----"
 	// armorFooter is the footer line of the ASCII-armor format.
-	armorFooter = "-----END CIPHERLOCK-----"
+	armorFooter  = "-----END CIPHERLOCK-----"
 	armorLineLen = 64
 )
 

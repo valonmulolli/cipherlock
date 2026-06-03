@@ -234,5 +234,3 @@ func TestDecryptV3NoChecksum(t *testing.T) {
 		t.Fatalf("round-trip mismatch")
 	}
 }
-
-

@@ -29,5 +29,3 @@ func progressReader(r io.Reader, size int64, label string) io.Reader {
 	r2 := progressbar.NewReader(r, bar)
 	return &r2
 }
-
-
