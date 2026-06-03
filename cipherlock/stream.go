@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
 	"hash"
 	"io"
 	"time"
@@ -248,6 +249,9 @@ func EncryptStream(dst io.Writer, src io.Reader, password []byte, config *Config
 	chunkSize := cfg.ChunkSize
 	if chunkSize <= 0 {
 		chunkSize = DefaultChunkSize
+	}
+	if chunkSize > maxChunkSize {
+		return fmt.Errorf("cipherlock: ChunkSize %d exceeds maxChunkSize %d", chunkSize, maxChunkSize)
 	}
 	cfg.ChunkSize = chunkSize
 
