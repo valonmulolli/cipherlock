@@ -12,23 +12,21 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
-const formatVersionMulti byte = 0x04
-
 type recipientEntry struct {
-	Salt        []byte
-	Time        uint32
-	Memory      uint32
-	Threads     uint8
-	KeyLen      uint32
-	KeyNonce    [nonceSize]byte
-	SealedKey   []byte
+	Salt      []byte
+	Time      uint32
+	Memory    uint32
+	Threads   uint8
+	KeyLen    uint32
+	KeyNonce  [nonceSize]byte
+	SealedKey []byte
 }
 
 type multiHeader struct {
-	Flags       byte
-	Recipients  []recipientEntry
-	FileNonce   [nonceSize]byte
-	Checksum    []byte
+	Flags      byte
+	Recipients []recipientEntry
+	FileNonce  [nonceSize]byte
+	Checksum   []byte
 }
 
 func writeMultiHeader(w io.Writer, entries []recipientEntry, fileNonce []byte, checksum []byte, flags byte) error {
@@ -115,6 +113,9 @@ func readMultiHeader(r io.Reader) (multiHeader, error) {
 	if err := read(&numRecipients); err != nil {
 		return h, ErrInvalidFormat
 	}
+	if numRecipients > maxRecipients {
+		return h, ErrCorrupted
+	}
 
 	h.Recipients = make([]recipientEntry, numRecipients)
 	for i := range h.Recipients {
@@ -123,6 +124,9 @@ func readMultiHeader(r io.Reader) (multiHeader, error) {
 		var saltLen uint16
 		if err := read(&saltLen); err != nil {
 			return h, ErrInvalidFormat
+		}
+		if saltLen > maxSaltLen {
+			return h, ErrCorrupted
 		}
 		e.Salt = make([]byte, saltLen)
 		if _, err := io.ReadFull(r, e.Salt); err != nil {
@@ -140,6 +144,9 @@ func readMultiHeader(r io.Reader) (multiHeader, error) {
 		}
 		if err := read(&e.KeyLen); err != nil {
 			return h, ErrInvalidFormat
+		}
+		if e.KeyLen == 0 || e.KeyLen > maxKeyLen {
+			return h, ErrCorrupted
 		}
 		if _, err := io.ReadFull(r, e.KeyNonce[:]); err != nil {
 			return h, ErrInvalidFormat
