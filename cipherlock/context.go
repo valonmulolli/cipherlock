@@ -84,6 +84,9 @@ func DecryptStreamContext(ctx context.Context, dst io.Writer, src io.Reader, pas
 // EncryptMultiContext is a context-aware wrapper around EncryptMulti.
 // It cancels multi-key encryption if the context is done before completion.
 //
+// Deprecated: EncryptMulti (and this wrapper) is retained only for v0x04
+// backward compatibility. New code should use EncryptStreamMulti (v0x07).
+//
 // NOTE: Context cancellation does not interrupt an in-progress Argon2id key
 // derivation. The spawned goroutine runs the KDF to completion even after
 // ctx is cancelled.

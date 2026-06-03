@@ -319,22 +319,38 @@ err := cipherlock.ReKeyFile("old.encrypted", "new.encrypted", oldPassword, newPa
 
 ### Multi-recipient encryption
 
+Use `EncryptStreamMulti` (v0x07) for new code. It streams the plaintext
+through encryption, supports an optional encrypted `FileMeta`, and is
+the recommended path for arbitrarily large files.
+
 ```go
 passwords := [][]byte{[]byte("alice"), []byte("bob"), []byte("charlie")}
 var buf bytes.Buffer
-err := cipherlock.EncryptMulti(&buf, someReader, passwords, nil)
+err := cipherlock.EncryptStreamMulti(&buf, someReader, passwords, nil)
 
 var decBuf bytes.Buffer
-err := cipherlock.Decrypt(&decBuf, bytes.NewReader(buf.Bytes()), []byte("bob"))
+meta, err := cipherlock.DecryptStreamMultiFromReader(&decBuf, bytes.NewReader(buf.Bytes()), []byte("bob"))
+// meta is non-nil when the source was encrypted with a FileMeta attached.
 ```
 
-For large multi-recipient files, prefer the streaming variant so the entire
-plaintext is not held in memory:
+`EncryptMulti` (v0x04) is deprecated: it buffers the full plaintext in
+memory. Existing v0x04 files are still readable, but new code should
+target v0x07 via `EncryptStreamMulti`.
+
+#### Recovering FileMeta on decrypt
+
+The metadata-aware helpers return the `*FileMeta` attached at encrypt
+time, which is non-nil only for v0x06/v0x07 sources:
 
 ```go
-err := cipherlock.EncryptStreamMulti(dst, src, passwords, config)
-meta, err := cipherlock.DecryptStreamMultiFromReader(dst, src, []byte("bob"))
+meta, err := cipherlock.DecryptWithMeta(dst, src, password)        // all formats
+meta, err := cipherlock.DecryptFileWithMeta("file.enc", "out", pwd) // file variant
+meta, err := cipherlock.DecryptStreamMultiFromReader(dst, src, pwd) // v0x07 only
 ```
+
+For v0x02-v0x05 sources the returned meta is nil. Use
+`ReadStreamMeta` / `ReadStreamMetaWithPassword` for streaming inspection
+of the header without performing a full decrypt.
 
 ### Encrypted-metadata streaming (v0x06)
 

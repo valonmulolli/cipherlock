@@ -23,19 +23,30 @@ func Encrypt(dst io.Writer, src io.Reader, password []byte, config *Config) erro
 // It supports all format versions (v2, v3, v0x04 multi-key, v0x05 stream,
 // v0x06 stream with encrypted metadata, v0x07 streaming multi-recipient).
 // Returns ErrInvalidFormat, ErrVersionMismatch, ErrAuthFailed, or
-// ErrChecksumMismatch on failure.
+// ErrChecksumMismatch on failure. To recover FileMeta attached to a
+// v0x06/v0x07 container use DecryptWithMeta.
 func Decrypt(dst io.Writer, src io.Reader, password []byte) error {
+	_, err := DecryptWithMeta(dst, src, password)
+	return err
+}
+
+// DecryptWithMeta is the metadata-aware form of Decrypt. The returned
+// *FileMeta is non-nil only when the source was encrypted with v0x06 or
+// v0x07 and had a FileMeta attached; v0x02 through v0x05 return nil. It
+// exists so that downstream code can recover the original filename and
+// modification time without an extra ReadStreamMetaWithPassword call.
+func DecryptWithMeta(dst io.Writer, src io.Reader, password []byte) (*FileMeta, error) {
 	var hdrMagic [4]byte
 	if _, err := io.ReadFull(src, hdrMagic[:]); err != nil {
-		return ErrInvalidFormat
+		return nil, ErrInvalidFormat
 	}
 	if hdrMagic != magic {
-		return ErrInvalidFormat
+		return nil, ErrInvalidFormat
 	}
 
 	var version byte
 	if err := binary.Read(src, binary.LittleEndian, &version); err != nil {
-		return ErrInvalidFormat
+		return nil, ErrInvalidFormat
 	}
 
 	// Each per-version decrypt helper consumes a fixed prefix from src. We
@@ -53,26 +64,26 @@ func Decrypt(dst io.Writer, src io.Reader, password []byte) error {
 	case formatVersionV2, formatVersion:
 		// decryptV2V3 calls readHeader which re-reads magic+version.
 		combined := io.MultiReader(bytes.NewReader(prefixFor(5)), src)
-		return decryptV2V3(dst, combined, password)
+		return nil, decryptV2V3(dst, combined, password)
 	case formatVersionMulti:
 		// decryptMulti reads only the version byte.
 		multiSrc := io.MultiReader(bytes.NewReader(prefixFor(1)), src)
-		return decryptMulti(dst, multiSrc, password)
+		return nil, decryptMulti(dst, multiSrc, password)
 	case formatVersionStream:
 		streamSrc := io.MultiReader(bytes.NewReader(prefixFor(1)), src)
-		_, streamErr := decryptStream(dst, streamSrc, password)
-		return streamErr
+		meta, streamErr := decryptStream(dst, streamSrc, password)
+		return meta, streamErr
 	case formatVersionStreamV2:
 		streamSrc := io.MultiReader(bytes.NewReader(prefixFor(1)), src)
-		_, streamErr := decryptStreamV2(dst, streamSrc, password)
-		return streamErr
+		meta, streamErr := decryptStreamV2(dst, streamSrc, password)
+		return meta, streamErr
 	case formatVersionStreamMulti:
 		// DecryptStreamMultiFromReader re-reads magic+version.
 		multiSrc := io.MultiReader(bytes.NewReader(prefixFor(5)), src)
-		_, streamErr := DecryptStreamMultiFromReader(dst, multiSrc, password)
-		return streamErr
+		meta, streamErr := DecryptStreamMultiFromReader(dst, multiSrc, password)
+		return meta, streamErr
 	default:
-		return ErrVersionMismatch
+		return nil, ErrVersionMismatch
 	}
 }
 

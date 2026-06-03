@@ -51,6 +51,29 @@ func DecryptFile(source, dest string, password []byte) error {
 	return Decrypt(destFile, srcFile, password)
 }
 
+// DecryptFileWithMeta is the metadata-aware form of DecryptFile. The
+// returned *FileMeta is non-nil only when the source was a v0x06 or v0x07
+// container with a FileMeta attached.
+func DecryptFileWithMeta(source, dest string, password []byte) (*FileMeta, error) {
+	if dest == "" {
+		dest = defaultDecryptPath(source)
+	}
+
+	srcFile, err := os.Open(source)
+	if err != nil {
+		return nil, err
+	}
+	defer srcFile.Close() //nolint:errcheck
+
+	destFile, err := os.Create(dest)
+	if err != nil {
+		return nil, err
+	}
+	defer destFile.Close() //nolint:errcheck
+
+	return DecryptWithMeta(destFile, srcFile, password)
+}
+
 // IsEncrypted reports whether the file at path starts with the cipherlock magic bytes.
 // It returns false without error if the file cannot be read or is too short.
 func IsEncrypted(path string) (bool, error) {
