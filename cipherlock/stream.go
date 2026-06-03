@@ -111,15 +111,24 @@ func readStreamHeader(r io.Reader, password []byte) (sh streamHeader, key []byte
 	}
 
 	read(&sh.Time)
+	if sh.Time == 0 || sh.Time > maxTime {
+		return sh, nil, ErrCorrupted
+	}
 	read(&sh.Memory)
+	if sh.Memory == 0 || sh.Memory > maxMemory {
+		return sh, nil, ErrCorrupted
+	}
 	read(&sh.Threads)
+	if sh.Threads == 0 || sh.Threads > maxThreads {
+		return sh, nil, ErrCorrupted
+	}
 	read(&sh.KeyLen)
+	if sh.KeyLen == 0 || sh.KeyLen > maxKeyLen {
+		return sh, nil, ErrCorrupted
+	}
 	read(&sh.ChunkSize)
 	if err != nil {
 		return sh, nil, ErrInvalidFormat
-	}
-	if sh.KeyLen == 0 || sh.KeyLen > maxKeyLen {
-		return sh, nil, ErrCorrupted
 	}
 	if sh.ChunkSize == 0 || sh.ChunkSize > maxChunkSize {
 		return sh, nil, ErrCorrupted

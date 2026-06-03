@@ -64,6 +64,21 @@ const maxKeyLen = 64
 // a 100GB body. 1 GiB is well beyond any realistic single-file use case.
 const maxV04Body = 1 << 30
 
+// maxMemory bounds the Argon2id Memory parameter accepted from any header.
+// 256 MiB matches OWASP's 2024 high-security recommendation; any sane profile
+// sits well below this. Without this, a 1KB hostile file can claim
+// Memory=0xFFFFFFFF and force a multi-GB allocation when the decrypt path
+// runs Argon2id.
+const maxMemory = 256 * 1024
+
+// maxTime bounds the Argon2id Time parameter. The OWASP recommendation is
+// 3-7 iterations; anything beyond 60 is a hostile or corrupted file.
+const maxTime = 60
+
+// maxThreads bounds the Argon2id Threads parameter. Real Argon2id is rarely
+// run with more than 8 threads; 32 is a generous upper bound.
+const maxThreads uint8 = 32
+
 type header struct {
 	Magic    [4]byte
 	Version  byte
@@ -118,11 +133,20 @@ func readHeader(r io.Reader) (header, error) {
 	if err := binary.Read(r, binary.LittleEndian, &h.Time); err != nil {
 		return h, ErrInvalidFormat
 	}
+	if h.Time == 0 || h.Time > maxTime {
+		return h, ErrCorrupted
+	}
 	if err := binary.Read(r, binary.LittleEndian, &h.Memory); err != nil {
 		return h, ErrInvalidFormat
 	}
+	if h.Memory == 0 || h.Memory > maxMemory {
+		return h, ErrCorrupted
+	}
 	if err := binary.Read(r, binary.LittleEndian, &h.Threads); err != nil {
 		return h, ErrInvalidFormat
+	}
+	if h.Threads == 0 || h.Threads > maxThreads {
+		return h, ErrCorrupted
 	}
 	if err := binary.Read(r, binary.LittleEndian, &h.KeyLen); err != nil {
 		return h, ErrInvalidFormat

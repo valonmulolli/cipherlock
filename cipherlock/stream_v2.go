@@ -116,11 +116,20 @@ func readStreamV2Header(r io.Reader, password []byte) (streamV2Header, []byte, e
 	if err := read(&sh.Time); err != nil {
 		return sh, nil, ErrInvalidFormat
 	}
+	if sh.Time == 0 || sh.Time > maxTime {
+		return sh, nil, ErrCorrupted
+	}
 	if err := read(&sh.Memory); err != nil {
 		return sh, nil, ErrInvalidFormat
 	}
+	if sh.Memory == 0 || sh.Memory > maxMemory {
+		return sh, nil, ErrCorrupted
+	}
 	if err := read(&sh.Threads); err != nil {
 		return sh, nil, ErrInvalidFormat
+	}
+	if sh.Threads == 0 || sh.Threads > maxThreads {
+		return sh, nil, ErrCorrupted
 	}
 	if err := read(&sh.KeyLen); err != nil {
 		return sh, nil, ErrInvalidFormat
@@ -454,11 +463,20 @@ func readStreamV2MetaOnly(r io.Reader, password []byte) (*FileMeta, error) {
 	if err := read(&sh.Time); err != nil {
 		return nil, ErrInvalidFormat
 	}
+	if sh.Time == 0 || sh.Time > maxTime {
+		return nil, ErrCorrupted
+	}
 	if err := read(&sh.Memory); err != nil {
 		return nil, ErrInvalidFormat
 	}
+	if sh.Memory == 0 || sh.Memory > maxMemory {
+		return nil, ErrCorrupted
+	}
 	if err := read(&sh.Threads); err != nil {
 		return nil, ErrInvalidFormat
+	}
+	if sh.Threads == 0 || sh.Threads > maxThreads {
+		return nil, ErrCorrupted
 	}
 	if err := read(&sh.KeyLen); err != nil {
 		return nil, ErrInvalidFormat

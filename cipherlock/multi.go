@@ -136,11 +136,20 @@ func readMultiHeader(r io.Reader) (multiHeader, error) {
 		if err := read(&e.Time); err != nil {
 			return h, ErrInvalidFormat
 		}
+		if e.Time == 0 || e.Time > maxTime {
+			return h, ErrCorrupted
+		}
 		if err := read(&e.Memory); err != nil {
 			return h, ErrInvalidFormat
 		}
+		if e.Memory == 0 || e.Memory > maxMemory {
+			return h, ErrCorrupted
+		}
 		if err := read(&e.Threads); err != nil {
 			return h, ErrInvalidFormat
+		}
+		if e.Threads == 0 || e.Threads > maxThreads {
+			return h, ErrCorrupted
 		}
 		if err := read(&e.KeyLen); err != nil {
 			return h, ErrInvalidFormat

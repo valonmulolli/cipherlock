@@ -117,11 +117,20 @@ func readStreamMultiHeader(r io.Reader) (streamMultiHeader, error) {
 		if err := read(&e.Time); err != nil {
 			return h, ErrInvalidFormat
 		}
+		if e.Time == 0 || e.Time > maxTime {
+			return h, ErrCorrupted
+		}
 		if err := read(&e.Memory); err != nil {
 			return h, ErrInvalidFormat
 		}
+		if e.Memory == 0 || e.Memory > maxMemory {
+			return h, ErrCorrupted
+		}
 		if err := read(&e.Threads); err != nil {
 			return h, ErrInvalidFormat
+		}
+		if e.Threads == 0 || e.Threads > maxThreads {
+			return h, ErrCorrupted
 		}
 		if err := read(&e.KeyLen); err != nil {
 			return h, ErrInvalidFormat
@@ -488,11 +497,20 @@ func readStreamMultiMeta(r io.Reader, password []byte) (*FileMeta, error) {
 		if err := read(&e.Time); err != nil {
 			return nil, ErrInvalidFormat
 		}
+		if e.Time == 0 || e.Time > maxTime {
+			return nil, ErrCorrupted
+		}
 		if err := read(&e.Memory); err != nil {
 			return nil, ErrInvalidFormat
 		}
+		if e.Memory == 0 || e.Memory > maxMemory {
+			return nil, ErrCorrupted
+		}
 		if err := read(&e.Threads); err != nil {
 			return nil, ErrInvalidFormat
+		}
+		if e.Threads == 0 || e.Threads > maxThreads {
+			return nil, ErrCorrupted
 		}
 		if err := read(&e.KeyLen); err != nil {
 			return nil, ErrInvalidFormat
