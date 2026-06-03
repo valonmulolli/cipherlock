@@ -2,6 +2,8 @@ package cipherlock
 
 import (
 	"bytes"
+	"encoding/binary"
+	"errors"
 	"testing"
 )
 
@@ -91,5 +93,37 @@ func TestEncryptMultiSinglePassword(t *testing.T) {
 	}
 	if !bytes.Equal(decBuf.Bytes(), plaintext) {
 		t.Fatalf("got %q, want %q", decBuf.Bytes(), plaintext)
+	}
+}
+
+// TestMultiV04RejectsOversizedSealedKey checks the v0x04 reader's bound on the
+// per-recipient sealed-key length. A crafted header used to be able to claim
+// up to 65535 bytes per recipient.
+func TestMultiV04RejectsOversizedSealedKey(t *testing.T) {
+	plaintext := []byte("v04 oom check")
+	passwords := [][]byte{[]byte("pwd")}
+
+	var buf bytes.Buffer
+	if err := EncryptMulti(&buf, bytes.NewReader(plaintext), passwords, nil); err != nil {
+		t.Fatal(err)
+	}
+	data := buf.Bytes()
+
+	// v0x04 header layout for the first recipient:
+	//   magic(4) + version(1) + flags(1) + numRecipients(4) = 10
+	//   saltLen(2) + salt(16) + Time(4) + Memory(4) + Threads(1) + KeyLen(4) + KeyNonce(12)
+	//   = 43
+	//   sealedKeyLen(2) = at offset 53
+	const sealedKeyLenOff = 10 + 2 + 16 + 4 + 4 + 1 + 4 + 12
+	if sealedKeyLenOff+2 > len(data) {
+		t.Fatalf("data too short: %d bytes", len(data))
+	}
+	// Original value is keyLen(32) + GCM tag(16) = 48. Set to 1024.
+	binary.LittleEndian.PutUint16(data[sealedKeyLenOff:sealedKeyLenOff+2], 1024)
+
+	var decBuf bytes.Buffer
+	err := Decrypt(&decBuf, bytes.NewReader(data), []byte("pwd"))
+	if !errors.Is(err, ErrCorrupted) {
+		t.Fatalf("expected ErrCorrupted, got %v", err)
 	}
 }

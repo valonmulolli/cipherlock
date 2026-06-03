@@ -156,6 +156,12 @@ func readMultiHeader(r io.Reader) (multiHeader, error) {
 		if err := read(&keyLen); err != nil {
 			return h, ErrInvalidFormat
 		}
+		// Bound the sealed-key length to the KDF key length + 16-byte GCM tag.
+		// Without this, a malicious v0x04 header can request up to 65535 bytes
+		// per recipient and force multi-megabyte allocations on open.
+		if keyLen == 0 || int(keyLen) > int(e.KeyLen)+16 {
+			return h, ErrCorrupted
+		}
 		e.SealedKey = make([]byte, keyLen)
 		if _, err := io.ReadFull(r, e.SealedKey); err != nil {
 			return h, ErrInvalidFormat
@@ -297,7 +303,10 @@ func decryptMulti(dst io.Writer, remaining io.Reader, password []byte) error {
 		return ErrAuthFailed
 	}
 
-	ciphertext, err := io.ReadAll(remaining)
+	// Cap the v0x04 body to a sane upper bound to prevent OOM via a hostile
+	// header. v0x04 stores the entire ciphertext as a single GCM blob (no
+	// chunking), so 1 GiB is generous for any legitimate use case.
+	ciphertext, err := io.ReadAll(io.LimitReader(remaining, maxV04Body))
 	if err != nil {
 		return err
 	}

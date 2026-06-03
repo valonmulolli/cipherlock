@@ -59,6 +59,11 @@ const maxChunkSize = 16 * 1024 * 1024
 // bytes; anything larger is a malicious or corrupted file.
 const maxKeyLen = 64
 
+// maxV04Body bounds the v0x04 ciphertext body. v0x04 is a single-blob format
+// with no per-chunk length, so an unbounded read would let a 1KB header claim
+// a 100GB body. 1 GiB is well beyond any realistic single-file use case.
+const maxV04Body = 1 << 30
+
 type header struct {
 	Magic    [4]byte
 	Version  byte
