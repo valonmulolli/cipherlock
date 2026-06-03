@@ -202,9 +202,6 @@ func decryptStreamV2Meta(r io.Reader, aesgcm cipher.AEAD) (*FileMeta, error) {
 	if err != nil {
 		return nil, ErrAuthFailed
 	}
-	if err != nil {
-		return nil, ErrAuthFailed
-	}
 
 	if len(plaintext) < 2 {
 		return nil, ErrCorrupted

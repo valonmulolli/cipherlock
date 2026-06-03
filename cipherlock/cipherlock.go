@@ -38,23 +38,37 @@ func Decrypt(dst io.Writer, src io.Reader, password []byte) error {
 		return ErrInvalidFormat
 	}
 
+	// Each per-version decrypt helper consumes a fixed prefix from src. We
+	// prepend that prefix back so the helper sees the same byte stream as
+	// the original file. prefixFor returns the bytes to prepend for a helper
+	// that consumed 1 byte (just the version) or 5 bytes (magic+version).
+	prefixFor := func(consumedBytes int) []byte {
+		if consumedBytes == 1 {
+			return []byte{version}
+		}
+		return append(hdrMagic[:], version)
+	}
+
 	switch version {
 	case formatVersionV2, formatVersion:
-		combined := io.MultiReader(bytes.NewReader(append(hdrMagic[:], version)), src)
+		// decryptV2V3 calls readHeader which re-reads magic+version.
+		combined := io.MultiReader(bytes.NewReader(prefixFor(5)), src)
 		return decryptV2V3(dst, combined, password)
 	case formatVersionMulti:
-		multiSrc := io.MultiReader(bytes.NewReader([]byte{version}), src)
+		// decryptMulti reads only the version byte.
+		multiSrc := io.MultiReader(bytes.NewReader(prefixFor(1)), src)
 		return decryptMulti(dst, multiSrc, password)
 	case formatVersionStream:
-		streamSrc := io.MultiReader(bytes.NewReader([]byte{version}), src)
+		streamSrc := io.MultiReader(bytes.NewReader(prefixFor(1)), src)
 		_, streamErr := decryptStream(dst, streamSrc, password)
 		return streamErr
 	case formatVersionStreamV2:
-		streamSrc := io.MultiReader(bytes.NewReader([]byte{version}), src)
+		streamSrc := io.MultiReader(bytes.NewReader(prefixFor(1)), src)
 		_, streamErr := decryptStreamV2(dst, streamSrc, password)
 		return streamErr
 	case formatVersionStreamMulti:
-		multiSrc := io.MultiReader(bytes.NewReader(append(hdrMagic[:], version)), src)
+		// DecryptStreamMultiFromReader re-reads magic+version.
+		multiSrc := io.MultiReader(bytes.NewReader(prefixFor(5)), src)
 		_, streamErr := DecryptStreamMultiFromReader(dst, multiSrc, password)
 		return streamErr
 	default:

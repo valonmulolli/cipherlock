@@ -92,7 +92,7 @@ func readStreamMultiHeader(r io.Reader) (streamMultiHeader, error) {
 		return h, ErrInvalidFormat
 	}
 	if numRecipients == 0 {
-		return h, ErrAtLeastOnePassword
+		return h, ErrCorrupted
 	}
 	if numRecipients > maxRecipients {
 		return h, ErrCorrupted
