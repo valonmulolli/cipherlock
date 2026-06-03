@@ -13,8 +13,6 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
-const formatVersionStream byte = 0x05
-
 type streamHeader struct {
 	Salt      []byte
 	Time      uint32
@@ -103,6 +101,9 @@ func readStreamHeader(r io.Reader, password []byte) (sh streamHeader, key []byte
 	if err != nil {
 		return sh, nil, ErrInvalidFormat
 	}
+	if saltLen > maxSaltLen {
+		return sh, nil, ErrCorrupted
+	}
 
 	sh.Salt = make([]byte, saltLen)
 	if _, err = io.ReadFull(r, sh.Salt); err != nil {
@@ -116,6 +117,12 @@ func readStreamHeader(r io.Reader, password []byte) (sh streamHeader, key []byte
 	read(&sh.ChunkSize)
 	if err != nil {
 		return sh, nil, ErrInvalidFormat
+	}
+	if sh.KeyLen == 0 || sh.KeyLen > maxKeyLen {
+		return sh, nil, ErrCorrupted
+	}
+	if sh.ChunkSize == 0 || sh.ChunkSize > maxChunkSize {
+		return sh, nil, ErrCorrupted
 	}
 
 	var hasMeta byte
@@ -224,11 +231,16 @@ func EncryptStream(dst io.Writer, src io.Reader, password []byte, config *Config
 		config = DefaultConfig
 	}
 
-	chunkSize := config.ChunkSize
+	// Take a local copy so we never mutate the caller's config (or the shared
+	// DefaultConfig) under concurrent use.
+	cfg := *config
+	config = &cfg
+
+	chunkSize := cfg.ChunkSize
 	if chunkSize <= 0 {
 		chunkSize = DefaultChunkSize
 	}
-	config.ChunkSize = chunkSize
+	cfg.ChunkSize = chunkSize
 
 	var hasher hash.Hash
 	if config.Checksum {
@@ -262,7 +274,9 @@ func DecryptStream(dst io.Writer, src io.Reader, password []byte) error {
 }
 
 // ReadStreamMeta reads the FileMeta from a stream-format cipherlock header without decrypting
-// the data. Returns nil if the file is not in stream format or has no metadata.
+// the data. Returns nil if the file is not in stream format or has no metadata. For files
+// that use the v0x06 or v0x07 format (which store metadata as an encrypted chunk) it
+// returns ErrEncryptedMeta; callers should use ReadStreamMetaWithPassword in that case.
 func ReadStreamMeta(src io.Reader) (*FileMeta, error) {
 	var hdrMagic [4]byte
 	if _, err := io.ReadFull(src, hdrMagic[:]); err != nil {
@@ -276,7 +290,12 @@ func ReadStreamMeta(src io.Reader) (*FileMeta, error) {
 	if err := binary.Read(src, binary.LittleEndian, &version); err != nil {
 		return nil, ErrInvalidFormat
 	}
-	if version != formatVersionStream {
+	switch version {
+	case formatVersionStreamV2, formatVersionStreamMulti:
+		return nil, ErrEncryptedMeta
+	case formatVersionStream:
+		// fall through
+	default:
 		return nil, nil
 	}
 
@@ -287,6 +306,9 @@ func ReadStreamMeta(src io.Reader) (*FileMeta, error) {
 	var saltLen uint16
 	if err := binary.Read(src, binary.LittleEndian, &saltLen); err != nil {
 		return nil, ErrInvalidFormat
+	}
+	if saltLen > maxSaltLen {
+		return nil, ErrCorrupted
 	}
 
 	salt := make([]byte, saltLen)
@@ -326,6 +348,88 @@ func ReadStreamMeta(src io.Reader) (*FileMeta, error) {
 		return nil, ErrInvalidFormat
 	}
 
+	return &FileMeta{
+		Name:    string(nameBytes),
+		Size:    size,
+		ModTime: time.Unix(0, modNano),
+	}, nil
+}
+
+// ReadStreamMetaWithPassword reads the FileMeta from any stream-format cipherlock header
+// (v0x05, v0x06, v0x07) by supplying a password. For v0x05 files the password is unused
+// and the metadata is read in cleartext. For v0x06 / v0x07 files the password and KDF
+// are required to unseal the metadata chunk. Returns ErrAuthFailed if the password
+// does not unlock a v0x06 or v0x07 file. Returns nil (no error) if the file has no
+// metadata attached.
+func ReadStreamMetaWithPassword(src io.Reader, password []byte) (*FileMeta, error) {
+	var hdrMagic [4]byte
+	if _, err := io.ReadFull(src, hdrMagic[:]); err != nil {
+		return nil, ErrInvalidFormat
+	}
+	if hdrMagic != magic {
+		return nil, ErrInvalidFormat
+	}
+
+	var version byte
+	if err := binary.Read(src, binary.LittleEndian, &version); err != nil {
+		return nil, ErrInvalidFormat
+	}
+
+	switch version {
+	case formatVersionStream:
+		return readStreamV05Meta(src)
+	case formatVersionStreamV2:
+		return readStreamV2MetaOnly(src, password)
+	case formatVersionStreamMulti:
+		return readStreamMultiMeta(src, password)
+	default:
+		return nil, nil
+	}
+}
+
+// readStreamV05Meta parses the cleartext metadata fields from a v0x05 header.
+// The version byte has already been consumed; src starts at the flags byte.
+func readStreamV05Meta(src io.Reader) (*FileMeta, error) {
+	if _, err := io.CopyN(io.Discard, src, 1); err != nil {
+		return nil, ErrInvalidFormat
+	}
+	var saltLen uint16
+	if err := binary.Read(src, binary.LittleEndian, &saltLen); err != nil {
+		return nil, ErrInvalidFormat
+	}
+	if saltLen > maxSaltLen {
+		return nil, ErrCorrupted
+	}
+	salt := make([]byte, saltLen)
+	if _, err := io.ReadFull(src, salt); err != nil {
+		return nil, ErrInvalidFormat
+	}
+	if _, err := io.CopyN(io.Discard, src, 17); err != nil {
+		return nil, ErrInvalidFormat
+	}
+	var hasMeta byte
+	if err := binary.Read(src, binary.LittleEndian, &hasMeta); err != nil {
+		return nil, ErrInvalidFormat
+	}
+	if hasMeta == 0 {
+		return nil, nil
+	}
+	var nameLen uint16
+	if err := binary.Read(src, binary.LittleEndian, &nameLen); err != nil {
+		return nil, ErrInvalidFormat
+	}
+	nameBytes := make([]byte, nameLen)
+	if _, err := io.ReadFull(src, nameBytes); err != nil {
+		return nil, ErrInvalidFormat
+	}
+	var size int64
+	if err := binary.Read(src, binary.LittleEndian, &size); err != nil {
+		return nil, ErrInvalidFormat
+	}
+	var modNano int64
+	if err := binary.Read(src, binary.LittleEndian, &modNano); err != nil {
+		return nil, ErrInvalidFormat
+	}
 	return &FileMeta{
 		Name:    string(nameBytes),
 		Size:    size,

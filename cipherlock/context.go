@@ -99,3 +99,84 @@ func EncryptMultiContext(ctx context.Context, dst io.Writer, src io.Reader, pass
 		return err
 	}
 }
+
+// EncryptStreamV2Context is a context-aware wrapper around EncryptStreamV2.
+// It cancels v0x06 streaming encryption if the context is done before completion.
+//
+// NOTE: Context cancellation does not interrupt an in-progress Argon2id key
+// derivation. The spawned goroutine runs the KDF to completion even after
+// ctx is cancelled.
+func EncryptStreamV2Context(ctx context.Context, dst io.Writer, src io.Reader, password []byte, config *Config) error {
+	done := make(chan error, 1)
+	go func() {
+		done <- EncryptStreamV2(dst, src, password, config)
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-done:
+		return err
+	}
+}
+
+// DecryptStreamV2Context is a context-aware wrapper around DecryptStreamV2.
+// It cancels v0x06 streaming decryption if the context is done before completion.
+//
+// NOTE: Context cancellation does not interrupt an in-progress Argon2id key
+// derivation. The spawned goroutine runs the KDF to completion even after
+// ctx is cancelled.
+func DecryptStreamV2Context(ctx context.Context, dst io.Writer, src io.Reader, password []byte) error {
+	done := make(chan error, 1)
+	go func() {
+		_, err := DecryptStreamV2(dst, src, password)
+		done <- err
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-done:
+		return err
+	}
+}
+
+// EncryptStreamMultiContext is a context-aware wrapper around EncryptStreamMulti.
+// It cancels v0x07 streaming multi-recipient encryption if the context is done
+// before completion.
+//
+// NOTE: Context cancellation does not interrupt an in-progress Argon2id key
+// derivation. The spawned goroutine runs the KDF to completion even after
+// ctx is cancelled.
+func EncryptStreamMultiContext(ctx context.Context, dst io.Writer, src io.Reader, passwords [][]byte, config *Config) error {
+	done := make(chan error, 1)
+	go func() {
+		done <- EncryptStreamMulti(dst, src, passwords, config)
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-done:
+		return err
+	}
+}
+
+// DecryptStreamMultiContext is a context-aware wrapper around the v0x07 streaming
+// multi-recipient decrypt path. The meta argument is unused and kept for symmetry
+// with other DecryptContext variants; metadata is always returned via
+// ReadStreamMetaWithPassword when needed.
+//
+// NOTE: Context cancellation does not interrupt an in-progress Argon2id key
+// derivation. The spawned goroutine runs the KDF to completion even after
+// ctx is cancelled.
+func DecryptStreamMultiContext(ctx context.Context, dst io.Writer, src io.Reader, password []byte) error {
+	done := make(chan error, 1)
+	go func() {
+		_, err := DecryptStreamMultiFromReader(dst, src, password)
+		done <- err
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-done:
+		return err
+	}
+}

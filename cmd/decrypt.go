@@ -17,8 +17,8 @@ import (
 )
 
 var (
-	decryptOutput   string
-	decryptKeyFile  string
+	decryptOutput  string
+	decryptKeyFile string
 )
 
 var decryptCmd = &cobra.Command{
@@ -130,7 +130,7 @@ plaintext to stdout.`,
 			stopKDF := showKDF()
 
 			err = decryptFromReader(destFile, srcReader, password)
-			srcFile.Close() //nolint:errcheck
+			srcFile.Close()  //nolint:errcheck
 			destFile.Close() //nolint:errcheck
 			stopKDF()
 			if err != nil {
@@ -211,7 +211,10 @@ func restoreMeta(encPath, decPath string, userSetOutput bool) {
 	defer encFile.Close() //nolint:errcheck
 
 	meta, err := cipherlock.ReadStreamMeta(encFile)
-	if err != nil || meta == nil {
+	if err != nil {
+		return
+	}
+	if meta == nil {
 		return
 	}
 

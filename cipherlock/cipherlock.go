@@ -20,8 +20,10 @@ func Encrypt(dst io.Writer, src io.Reader, password []byte, config *Config) erro
 }
 
 // Decrypt decrypts data read from src using password and writes plaintext to dst.
-// It supports all format versions (v2, v3, multi-key, and stream). Returns ErrInvalidFormat,
-// ErrVersionMismatch, ErrAuthFailed, or ErrChecksumMismatch on failure.
+// It supports all format versions (v2, v3, v0x04 multi-key, v0x05 stream,
+// v0x06 stream with encrypted metadata, v0x07 streaming multi-recipient).
+// Returns ErrInvalidFormat, ErrVersionMismatch, ErrAuthFailed, or
+// ErrChecksumMismatch on failure.
 func Decrypt(dst io.Writer, src io.Reader, password []byte) error {
 	var hdrMagic [4]byte
 	if _, err := io.ReadFull(src, hdrMagic[:]); err != nil {
@@ -46,6 +48,14 @@ func Decrypt(dst io.Writer, src io.Reader, password []byte) error {
 	case formatVersionStream:
 		streamSrc := io.MultiReader(bytes.NewReader([]byte{version}), src)
 		_, streamErr := decryptStream(dst, streamSrc, password)
+		return streamErr
+	case formatVersionStreamV2:
+		streamSrc := io.MultiReader(bytes.NewReader([]byte{version}), src)
+		_, streamErr := decryptStreamV2(dst, streamSrc, password)
+		return streamErr
+	case formatVersionStreamMulti:
+		multiSrc := io.MultiReader(bytes.NewReader(append(hdrMagic[:], version)), src)
+		_, streamErr := DecryptStreamMultiFromReader(dst, multiSrc, password)
 		return streamErr
 	default:
 		return ErrVersionMismatch

@@ -9,7 +9,9 @@ import (
 )
 
 // ReKey decrypts data from src with oldPassword and re-encrypts it with newPassword.
-// For stream-format files it performs the operation without buffering the entire plaintext.
+// For stream-format files (v0x05, v0x06, v0x07) it performs the operation without
+// buffering the entire plaintext. The output is always written in v0x05 streaming
+// format because only one password is in play after re-keying.
 func ReKey(dst io.Writer, src io.Reader, oldPassword, newPassword []byte, config *Config) error {
 	var hdrMagic [4]byte
 	if _, err := io.ReadFull(src, hdrMagic[:]); err != nil {
@@ -24,14 +26,24 @@ func ReKey(dst io.Writer, src io.Reader, oldPassword, newPassword []byte, config
 		return ErrInvalidFormat
 	}
 
-	if version == formatVersionStream {
+	if version == formatVersionStream || version == formatVersionStreamV2 || version == formatVersionStreamMulti {
 		pipeR, pipeW := io.Pipe()
 		errCh := make(chan error, 2)
 
+		// Re-prepend magic+version so the per-version decrypt helpers (which each
+		// read magic+version themselves) see the full stream.
 		fullSrc := io.MultiReader(bytes.NewReader(append(hdrMagic[:], version)), src)
 
 		go func() {
-			err := DecryptStream(pipeW, fullSrc, oldPassword)
+			var err error
+			switch version {
+			case formatVersionStream:
+				_, err = DecryptStreamMeta(pipeW, fullSrc, oldPassword)
+			case formatVersionStreamV2:
+				_, err = DecryptStreamV2(pipeW, fullSrc, oldPassword)
+			case formatVersionStreamMulti:
+				_, err = DecryptStreamMultiFromReader(pipeW, fullSrc, oldPassword)
+			}
 			pipeW.CloseWithError(err)
 			errCh <- err
 		}()

@@ -17,13 +17,13 @@ import (
 )
 
 var (
-	outputPath     string
-	genPassword    bool
-	armorMode      bool
-	keyFilePath    string
-	checksumFlag   bool
-	recipientPwds  []string
-	profileName    string
+	outputPath    string
+	genPassword   bool
+	armorMode     bool
+	keyFilePath   string
+	checksumFlag  bool
+	recipientPwds []string
+	profileName   string
 )
 
 var encryptCmd = &cobra.Command{
@@ -152,7 +152,7 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 				err = encryptToWriter(os.Stdout, os.Stdin, passwords, config)
 				stopKDF()
 				if bar != nil {
-				bar.Finish() //nolint:errcheck
+					bar.Finish() //nolint:errcheck
 				}
 				return err
 			}
@@ -237,7 +237,7 @@ func encryptToWriter(w io.Writer, r io.Reader, passwords [][]byte, config *ciphe
 	var encryptFn func(io.Writer, io.Reader, [][]byte, *cipherlock.Config) error
 	if len(passwords) > 1 {
 		encryptFn = func(dst io.Writer, src io.Reader, pwds [][]byte, cfg *cipherlock.Config) error {
-			return cipherlock.EncryptMulti(dst, src, pwds, cfg)
+			return cipherlock.EncryptStreamMulti(dst, src, pwds, cfg)
 		}
 	} else {
 		encryptFn = func(dst io.Writer, src io.Reader, pwds [][]byte, cfg *cipherlock.Config) error {
