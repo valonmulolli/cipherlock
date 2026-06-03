@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -247,11 +246,11 @@ func encryptToWriter(w io.Writer, r io.Reader, passwords [][]byte, config *ciphe
 	if !armorMode {
 		return encryptFn(w, r, passwords, config)
 	}
-	var buf bytes.Buffer
-	if err := encryptFn(&buf, r, passwords, config); err != nil {
-		return err
-	}
-	return cipherlock.Armor(w, buf.Bytes())
+	// Stream ciphertext through the armor writer so very large files
+	// don't have to fit in memory twice (encrypted + armored).
+	aw := cipherlock.NewArmorWriter(w)
+	defer aw.Close() //nolint:errcheck
+	return encryptFn(aw, r, passwords, config)
 }
 
 func init() {

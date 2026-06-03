@@ -1,6 +1,7 @@
 package cipherlock
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/base64"
 	"errors"
@@ -49,6 +50,8 @@ func Armor(w io.Writer, data []byte) error {
 }
 
 // Unarmor reads ASCII-armor encoded data from r and returns the decoded bytes.
+// It buffers the entire stream into memory; for large armored inputs use
+// NewUnarmorReader to stream the decoded bytes into a downstream reader.
 func Unarmor(r io.Reader) ([]byte, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
@@ -115,4 +118,187 @@ func IsArmoredReader(r io.Reader) (bool, io.Reader, error) {
 	}
 	combined := io.MultiReader(&buf, r)
 	return IsArmored(buf.Bytes()), combined, nil
+}
+
+// lineWriter wraps an io.Writer and breaks its output into
+// armorLineLen-character lines, terminated by '\n'. Used internally by
+// NewArmorWriter to convert base64.NewEncoder's arbitrary-sized output
+// into the line-wrapped format.
+type lineWriter struct {
+	w   io.Writer
+	buf []byte
+}
+
+func (lw *lineWriter) Write(p []byte) (int, error) {
+	n := len(p)
+	lw.buf = append(lw.buf, p...)
+	for len(lw.buf) >= armorLineLen {
+		if _, err := fmt.Fprintln(lw.w, string(lw.buf[:armorLineLen])); err != nil {
+			return 0, err
+		}
+		lw.buf = lw.buf[armorLineLen:]
+	}
+	return n, nil
+}
+
+func (lw *lineWriter) Flush() error {
+	if len(lw.buf) > 0 {
+		if _, err := fmt.Fprintln(lw.w, string(lw.buf)); err != nil {
+			return err
+		}
+		lw.buf = lw.buf[:0]
+	}
+	return nil
+}
+
+// NewArmorWriter returns a writer that base64-encodes anything written to
+// it and emits the result on w as ASCII-armored cipherlock data (header,
+// wrapped at armorLineLen-character lines, footer). Close must be called
+// to flush the base64 encoder, emit the final partial line, and write the
+// footer; callers should defer Close.
+//
+// The returned writer is not safe for concurrent use.
+func NewArmorWriter(w io.Writer) io.WriteCloser {
+	lw := &lineWriter{w: w, buf: make([]byte, 0, armorLineLen*2)}
+	enc := base64.NewEncoder(base64.StdEncoding, lw)
+	return &armorWriter{lw: lw, b64Enc: enc}
+}
+
+type armorWriter struct {
+	lw         *lineWriter
+	b64Enc     io.WriteCloser
+	headerSent bool
+	wroteBytes int64
+	closed     bool
+}
+
+func (aw *armorWriter) Write(p []byte) (int, error) {
+	if aw.closed {
+		return 0, errors.New("cipherlock: write to closed ArmorWriter")
+	}
+	if !aw.headerSent {
+		if _, err := fmt.Fprintln(aw.lw.w, armorHeader); err != nil {
+			return 0, err
+		}
+		aw.headerSent = true
+	}
+	n, err := aw.b64Enc.Write(p)
+	aw.wroteBytes += int64(n)
+	return n, err
+}
+
+func (aw *armorWriter) Close() error {
+	if aw.closed {
+		return nil
+	}
+	aw.closed = true
+	if !aw.headerSent {
+		if _, err := fmt.Fprintln(aw.lw.w, armorHeader); err != nil {
+			return err
+		}
+		aw.headerSent = true
+	}
+	if err := aw.b64Enc.Close(); err != nil {
+		return err
+	}
+	if err := aw.lw.Flush(); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintln(aw.lw.w, armorFooter)
+	return err
+}
+
+// BytesWritten reports the total number of plaintext bytes that have been
+// fed to Write. Useful for progress reporting alongside an io.Copy loop.
+func (aw *armorWriter) BytesWritten() int64 {
+	return aw.wroteBytes
+}
+
+// NewUnarmorReader returns an io.Reader that decodes ASCII-armored
+// cipherlock data on the fly. It scans r for the armorHeader, then
+// base64-decodes each subsequent line, and stops at armorFooter.
+//
+// Use NewUnarmorReader to pipe an armored source directly into a
+// streaming Decrypt path without buffering the full plaintext in memory.
+// If the input does not begin with armorHeader, NewUnarmorReader returns
+// the original reader unchanged so callers can transparently handle both
+// armored and raw inputs.
+//
+// The returned reader is not safe for concurrent reads.
+func NewUnarmorReader(r io.Reader) (io.Reader, error) {
+	// Peek the first line up to and including '\n' to decide whether r
+	// is armored. The peeked bytes are preserved in the returned reader.
+	br := bufio.NewReader(r)
+	firstLine, err := br.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+	trimmed := strings.TrimRight(firstLine, "\r\n\t ")
+	if trimmed != armorHeader {
+		// Not armored: replay the consumed line in front of the rest.
+		return &prefixedReader{prefix: []byte(firstLine), src: br}, nil
+	}
+	return &unarmorReader{br: br}, nil
+}
+
+type prefixedReader struct {
+	prefix []byte
+	src    io.Reader
+}
+
+func (pr *prefixedReader) Read(p []byte) (int, error) {
+	if len(pr.prefix) > 0 {
+		n := copy(p, pr.prefix)
+		pr.prefix = pr.prefix[n:]
+		return n, nil
+	}
+	return pr.src.Read(p)
+}
+
+type unarmorReader struct {
+	br     *bufio.Reader
+	footer bool
+	// decodedBuf holds whatever is left of the in-progress base64 decode.
+	decodedBuf []byte
+	// decodedPos is the read cursor into decodedBuf.
+	decodedPos int
+}
+
+func (u *unarmorReader) Read(p []byte) (int, error) {
+	if u.footer {
+		return 0, io.EOF
+	}
+	// Drain any pending decoded bytes first.
+	if u.decodedPos < len(u.decodedBuf) {
+		n := copy(p, u.decodedBuf[u.decodedPos:])
+		u.decodedPos += n
+		return n, nil
+	}
+
+	// Read the next line. If the line is the footer, we're done.
+	line, err := u.br.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return 0, err
+	}
+	if err == io.EOF && len(line) == 0 {
+		u.footer = true
+		return 0, io.ErrUnexpectedEOF
+	}
+	trimmed := strings.TrimRight(line, "\r\n\t ")
+	if trimmed == armorFooter {
+		u.footer = true
+		return 0, io.EOF
+	}
+	if trimmed == "" {
+		// Blank line: skip and recurse.
+		return u.Read(p)
+	}
+	decoded := make([]byte, base64.StdEncoding.DecodedLen(len(trimmed)))
+	n, decErr := base64.StdEncoding.Decode(decoded, []byte(trimmed))
+	if decErr != nil {
+		return 0, fmt.Errorf("cipherlock: base64 decode: %w", decErr)
+	}
+	u.decodedBuf = decoded[:n]
+	u.decodedPos = 0
+	return u.Read(p)
 }

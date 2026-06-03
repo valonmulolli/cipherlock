@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -11,9 +10,9 @@ import (
 
 	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/valonmulolli/cipherlock/cipherlock"
-	"golang.org/x/term"
 )
 
 var (
@@ -189,15 +188,13 @@ func decryptFromReader(w io.Writer, r io.Reader, password []byte) error {
 	}
 
 	if ok {
-		data, err := io.ReadAll(reader)
+		// Stream the base64-decoded bytes into Decrypt instead of
+		// buffering the entire armored payload in memory.
+		ur, err := cipherlock.NewUnarmorReader(reader)
 		if err != nil {
 			return err
 		}
-		decoded, err := cipherlock.UnarmorBytes(data)
-		if err != nil {
-			return err
-		}
-		return cipherlock.Decrypt(w, bytes.NewReader(decoded), password)
+		return cipherlock.Decrypt(w, ur, password)
 	}
 
 	return cipherlock.Decrypt(w, reader, password)
