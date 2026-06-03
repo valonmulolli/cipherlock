@@ -30,6 +30,9 @@ cipherlock is a Go library and CLI tool for encrypting files and directories usi
 - **KDF progress indicator**: "Deriving key..." throbber and file-size progress bars during encrypt/decrypt.
 - **Context-aware library API**: `EncryptContext`, `DecryptContext`, `EncryptStreamContext` — cancel long operations via Go contexts.
 - **Sentinel error types**: `ErrAuthFailed`, `ErrChecksumMismatch`, `ErrCorrupted` — programmatic error handling instead of string matching.
+- **Encrypted-metadata streaming (v0x06)**: Optional `FileMeta` is stored as an encrypted chunk so the original filename and size are not visible without the password.
+- **Streaming multi-recipient (v0x07)**: Multi-recipient encryption that streams the plaintext in fixed-size chunks. No upper file size limit, even with `--recipient` flags.
+- **Defensive header bounds**: Salt, key length, chunk size, and recipient count are validated against strict upper limits to prevent OOM via maliciously crafted files.
 
 ## Usage
 
@@ -210,9 +213,12 @@ if errors.Is(err, cipherlock.ErrCorrupted) {
 if errors.Is(err, cipherlock.ErrInvalidFormat) {
     // not a cipherlock file
 }
+if errors.Is(err, cipherlock.ErrEncryptedMeta) {
+    // metadata is encrypted; call ReadStreamMetaWithPassword with a password
+}
 ```
 
-Available sentinel errors: `ErrInvalidFormat`, `ErrVersionMismatch`, `ErrAuthFailed`, `ErrChecksumMismatch`, `ErrCorrupted`, `ErrAtLeastOnePassword`.
+Available sentinel errors: `ErrInvalidFormat`, `ErrVersionMismatch`, `ErrAuthFailed`, `ErrChecksumMismatch`, `ErrCorrupted`, `ErrAtLeastOnePassword`, `ErrEncryptedMeta`, `ErrNotArmored`.
 
 ### Read file metadata without decrypting
 
@@ -322,6 +328,54 @@ var decBuf bytes.Buffer
 err := cipherlock.Decrypt(&decBuf, bytes.NewReader(buf.Bytes()), []byte("bob"))
 ```
 
+For large multi-recipient files, prefer the streaming variant so the entire
+plaintext is not held in memory:
+
+```go
+err := cipherlock.EncryptStreamMulti(dst, src, passwords, config)
+meta, err := cipherlock.DecryptStreamMultiFromReader(dst, src, []byte("bob"))
+```
+
+### Encrypted-metadata streaming (v0x06)
+
+When you need to keep the original filename and size confidential, use the v0x06
+format. The metadata is stored as an encrypted chunk so it is not visible in the
+file without the password.
+
+```go
+cfg := &cipherlock.Config{
+    SaltLen:   16,
+    Time:      3,
+    Memory:    64 * 1024,
+    Threads:   4,
+    KeyLen:    32,
+    ChunkSize: 64 * 1024,
+    FileMeta: &cipherlock.FileMeta{
+        Name:    "secret-document.bin",
+        Size:    1024,
+        ModTime: time.Now(),
+    },
+}
+
+var buf bytes.Buffer
+if err := cipherlock.EncryptStreamV2(&buf, src, password, cfg); err != nil {
+    return err
+}
+
+// Decrypting recovers the metadata:
+var dec bytes.Buffer
+meta, err := cipherlock.DecryptStreamV2(&dec, &buf, password)
+// meta.Name == "secret-document.bin", meta.Size == 1024, etc.
+```
+
+Use `cipherlock.ReadStreamMetaWithPassword(r, password)` to read just the
+metadata without streaming the rest of the file. For v0x05 files the password
+is unused and the cleartext metadata is returned; for v0x06/v0x07 the password
+and KDF are required to unseal the metadata chunk.
+
+`ReadStreamMeta` (no password) still works for v0x05 files; for v0x06/v0x07
+files it returns `cipherlock.ErrEncryptedMeta`.
+
 ## File format
 
 cipherlock uses a self-describing binary format with versioned headers:
@@ -372,7 +426,7 @@ The ciphertext is encrypted with a random file key, which is then encrypted once
      N bytes    Argon2id salt
      4 bytes    Time parameter (little-endian)
      4 bytes    Memory parameter (little-endian)
-     1 byte     Threads
+     1 byte     Threads parameter
      4 bytes    Key length (little-endian)
      4 bytes    Chunk size (plaintext bytes per chunk)
      1 byte     Has metadata (0 = no, 1 = yes)
@@ -392,7 +446,64 @@ The ciphertext is encrypted with a random file key, which is then encrypted once
 
 The streaming format encrypts data incrementally in fixed-size chunks. Only one chunk is held in memory at a time. Each chunk uses a unique random nonce and is independently authenticated. The checksum (when enabled) is computed incrementally and stored as a trailer.
 
-Metadata (filename, size, modtime) is stored in the cleartext header for zero-cost inspection without decryption. This means anyone with access to the encrypted file can see the original filename and size. A future format version may encrypt the header.
+Metadata (filename, size, modtime) is stored in the cleartext header for zero-cost inspection without decryption. This means anyone with access to the encrypted file can see the original filename and size. To keep this metadata confidential, use v0x06 instead.
+
+### V6 (streaming, encrypted metadata)
+
+     4 bytes    Magic: "CV2\0"
+     1 byte     Version: 0x06
+     1 byte     Flags: bit 0 = checksum present, bit 1 = has metadata
+     2 bytes    Salt length
+     N bytes    Argon2id salt
+     4 bytes    Time
+     4 bytes    Memory
+     1 byte     Threads
+     4 bytes    Key length
+     4 bytes    Chunk size
+
+     [Optional encrypted metadata chunk, when flags bit 1 is set:]
+       12 bytes  Nonce
+       4 bytes   Ciphertext + GCM tag length
+       M bytes   Ciphertext + 16-byte GCM tag (decrypts to: filenameLen(2) + name + size(8) + modtime(8))
+
+     Zero or more data chunks: same as v0x05
+
+     End of stream: 4 zero bytes
+     [Optional 32-byte SHA-256 checksum trailer, when flags bit 0 is set]
+
+Identical to v0x05 except the optional metadata is encrypted under the same key as the data, so the original filename and size are not visible without the password. Use `EncryptStreamV2` / `DecryptStreamV2` from the library, or the `cipherlock` CLI which auto-selects this format when the source has metadata.
+
+### V7 (streaming, multi-recipient)
+
+     4 bytes    Magic: "CV2\0"
+     1 byte     Version: 0x07
+     1 byte     Flags: bit 0 = checksum present, bit 1 = has metadata
+     4 bytes    Number of recipients (little-endian)
+     For each recipient:
+       2 bytes  Salt length
+       N bytes  Argon2id salt
+       4 bytes  Time
+       4 bytes  Memory
+       1 byte   Threads
+       4 bytes  Key length
+       12 bytes Nonce for key encryption
+       2 bytes  Sealed key length
+       M bytes  Encrypted file key + GCM tag
+
+     [Optional encrypted metadata chunk, when flags bit 1 is set:]
+       12 bytes  Nonce
+       4 bytes   Ciphertext length
+       M bytes   Encrypted metadata (filename + size + modtime)
+
+     Zero or more data chunks: each chunk is encrypted with the shared file key
+       12 bytes  Nonce
+       4 bytes   Ciphertext length (0 = end)
+       N bytes   Ciphertext + 16-byte GCM tag
+
+     End of stream: 4 zero bytes
+     [Optional 32-byte SHA-256 checksum trailer, when flags bit 0 is set]
+
+A fresh random file key encrypts the data (and optional metadata chunk). The file key is then sealed once per recipient using their derived key. This is the streaming replacement for the legacy v0x04 `EncryptMulti` and supports arbitrarily large files without buffering the plaintext. Use `EncryptStreamMulti` / `DecryptStreamMulti` from the library, or the `cipherlock` CLI which auto-selects this format when `--recipient` is given more than once.
 
 ### ASCII-armor format
 
@@ -429,6 +540,64 @@ After successful replacement, the original file is securely shredded (overwritte
 ### V1 format caveat
 
 The original file-encryption tool used PBKDF2 with only 4096 iterations and SHA-1. Files created with that tool remain decryptable via cipherlock, but re-encrypt them with the V2 format to get Argon2id protection.
+
+## Threat model
+
+cipherlock is designed to protect files at rest against an attacker who obtains
+a copy of the encrypted file but does not know the password. The threat model
+covers what cipherlock does, what it does not do, and the format-version
+trade-offs.
+
+### In scope
+
+- **Confidentiality against offline brute force.** Argon2id with default
+  parameters is memory-hard, raising the cost of each guess to the point where
+  GPU and ASIC attacks are uneconomical. Use a high-entropy password; a
+  short password is vulnerable regardless of KDF cost.
+- **Integrity and authenticity.** Every chunk is independently authenticated
+  with AES-256-GCM. Any bit flip, truncation, or chunk swap is detected before
+  any plaintext is written. The optional SHA-256 trailer detects bit-level
+  tampering at the plaintext level when enabled.
+- **Metadata confidentiality (v0x06 / v0x07).** The original filename, size,
+  and modification time are stored as an encrypted chunk in v0x06 and v0x07.
+  Without the password, an attacker cannot tell whether the file is, say, a
+  4 KiB text file or a 4 GiB video.
+- **Memory exhaustion via malicious input.** Salt length, key length, chunk
+  size, recipient count, and per-chunk ciphertext length are all bounded
+  before allocation. A malicious file cannot cause multi-gigabyte allocations.
+- **Atomic file replacement.** The `--in-place` CLI path writes to a
+  temporary file and only renames it into place after successful encryption.
+  The original is then shredded, so a crash mid-operation never destroys
+  the source data.
+
+### Out of scope
+
+- **Online attacks.** cipherlock does not throttle password attempts; if an
+  attacker can submit guesses to your decrypt endpoint, rate-limit at the
+  application layer.
+- **Side channels.** The library is not constant-time with respect to
+  password length, chunk contents, or decryption outcomes. It is suitable
+  for at-rest encryption, not for adversarial on-device use.
+- **Live system threats.** cipherlock does not protect against a keylogger
+  on the encrypting or decrypting machine, an OS-level memory dump, or a
+  running process that reads the plaintext. Use a trusted, isolated
+  environment for sensitive operations.
+- **Traffic analysis.** The file size after encryption is approximately
+  `plaintext_size + chunk_overhead`. For a v0x07 multi-recipient file the
+  size grows linearly with the number of recipients. An attacker who
+  observes the network sees file size and timing, not contents.
+- **V1 / PBKDF2+SHA-1 files.** The V1 decrypt path exists for backward
+  compatibility only. Re-encrypt with V2 or later to get Argon2id protection.
+
+### Format-version trade-offs
+
+| Version | Year | Use when                                                                | Avoid when                             |
+| ------- | ---- | ----------------------------------------------------------------------- | -------------------------------------- |
+| V2/V3   | 2024 | Single recipient, plaintext fits in memory, checksum not needed         | Files larger than a few hundred MB     |
+| V4      | 2024 | Multi-recipient where all recipients can be enumerated at encrypt time  | Files larger than available RAM        |
+| V5      | 2024 | Single recipient, streaming, large files; metadata can be public        | Filename/size are sensitive            |
+| V6      | 2026 | Single recipient, streaming, large files, metadata must be confidential | You need zero-cost metadata inspection |
+| V7      | 2026 | Multi-recipient, streaming, large files, metadata must be confidential  | Legacy interop with V4 is required     |
 
 ## Installation
 
