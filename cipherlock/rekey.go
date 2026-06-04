@@ -8,10 +8,15 @@ import (
 	"os"
 )
 
-// ReKey decrypts data from src with oldPassword and re-encrypts it with newPassword.
-// For stream-format files (v0x05, v0x06, v0x07) it performs the operation without
-// buffering the entire plaintext. The output is always written in v0x05 streaming
-// format because only one password is in play after re-keying.
+// ReKey decrypts data from src with oldPassword and re-encrypts it with
+// newPassword. The output format mirrors the input format:
+//   - v0x05 in -> v0x05 out
+//   - v0x06 in -> v0x06 out (preserves the attached FileMeta)
+//   - v0x07 in -> v0x07 out (collapses the recipient list to newPassword)
+//
+// For all streaming inputs the operation is performed without buffering
+// the entire plaintext. For legacy v0x02/v0x03/v0x04 inputs the plaintext
+// is held in memory during re-encryption.
 func ReKey(dst io.Writer, src io.Reader, oldPassword, newPassword []byte, config *Config) error {
 	var hdrMagic [4]byte
 	if _, err := io.ReadFull(src, hdrMagic[:]); err != nil {
@@ -27,12 +32,31 @@ func ReKey(dst io.Writer, src io.Reader, oldPassword, newPassword []byte, config
 	}
 
 	if version == formatVersionStream || version == formatVersionStreamV2 || version == formatVersionStreamMulti {
+		// The streaming decrypt helpers consume magic+version themselves,
+		// so we need to chain those bytes back in front of src for the
+		// final fullSrc. For v0x06 / v0x07 we also need to capture the
+		// FileMeta before launching the streaming pipe so the re-encrypt
+		// side can re-attach it. We do that by teeing the captured bytes
+		// into a buffer that we then chain in front of the remaining src.
+		var fullSrc io.Reader
+		var meta *FileMeta
+		if version == formatVersionStreamV2 || version == formatVersionStreamMulti {
+			var captured bytes.Buffer
+			captured.Write(hdrMagic[:])
+			captured.WriteByte(version)
+			tee := io.TeeReader(src, &captured)
+			var err error
+			meta, err = captureMeta(tee, version, oldPassword)
+			if err != nil {
+				return err
+			}
+			fullSrc = io.MultiReader(&captured, src)
+		} else {
+			fullSrc = io.MultiReader(bytes.NewReader(append(hdrMagic[:], version)), src)
+		}
+
 		pipeR, pipeW := io.Pipe()
 		errCh := make(chan error, 2)
-
-		// Re-prepend magic+version so the per-version decrypt helpers (which each
-		// read magic+version themselves) see the full stream.
-		fullSrc := io.MultiReader(bytes.NewReader(append(hdrMagic[:], version)), src)
 
 		go func() {
 			var err error
@@ -50,12 +74,27 @@ func ReKey(dst io.Writer, src io.Reader, oldPassword, newPassword []byte, config
 
 		go func() {
 			defer pipeR.Close() //nolint:errcheck
-			err := EncryptStream(dst, pipeR, newPassword, config)
+			// Re-encrypt in the same format as the input. meta is only
+			// non-nil for v0x06 and v0x07. Default to DefaultConfig if
+			// the caller passed nil, matching the rest of the API.
+			cfg := config
+			if cfg == nil {
+				cfg = DefaultConfig
+			}
+			local := *cfg
+			local.FileMeta = meta
+			var err error
+			switch version {
+			case formatVersionStream:
+				err = EncryptStream(dst, pipeR, newPassword, &local)
+			case formatVersionStreamV2:
+				err = EncryptStreamV2(dst, pipeR, newPassword, &local)
+			case formatVersionStreamMulti:
+				err = EncryptStreamMulti(dst, pipeR, [][]byte{newPassword}, &local)
+			}
 			errCh <- err
 		}()
 
-		// Consume both goroutine errors. Return the one that is
-		// not a broken-pipe cascade error.
 		err1 := <-errCh
 		err2 := <-errCh
 		if err1 != nil && !errors.Is(err1, io.ErrClosedPipe) {
@@ -71,6 +110,28 @@ func ReKey(dst io.Writer, src io.Reader, oldPassword, newPassword []byte, config
 		return err
 	}
 	return Encrypt(dst, &buf, newPassword, config)
+}
+
+// metaCapture holds the captured FileMeta for a streaming source.
+// Used by ReKey to peek the meta off a non-seekable stream and
+// re-attach it on the re-encrypt side.
+type metaCapture struct {
+	meta *FileMeta
+}
+
+// captureMeta reads the header + optional meta chunk from src and
+// returns the captured FileMeta. src is expected to be positioned
+// just after the magic+version bytes (since readStreamV2MetaOnly
+// and readStreamMultiMeta both expect that).
+func captureMeta(src io.Reader, version byte, password []byte) (*FileMeta, error) {
+	switch version {
+	case formatVersionStreamV2:
+		return readStreamV2MetaOnly(src, password)
+	case formatVersionStreamMulti:
+		return readStreamMultiMeta(src, password)
+	default:
+		return nil, ErrInvalidFormat
+	}
 }
 
 // ReKeyFile decrypts a file with oldPassword and re-encrypts it with newPassword in place.

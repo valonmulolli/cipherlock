@@ -479,7 +479,7 @@ func readStreamMultiMeta(r io.Reader, password []byte) (*FileMeta, error) {
 		return nil, ErrInvalidFormat
 	}
 	if numRecipients == 0 {
-		return nil, ErrAtLeastOnePassword
+		return nil, ErrCorrupted
 	}
 
 	h.Recipients = make([]recipientEntry, numRecipients)
