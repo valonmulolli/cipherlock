@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 )
 
 // ReKey decrypts data from src with oldPassword and re-encrypts it with
@@ -127,23 +128,63 @@ func captureMeta(src io.Reader, version byte, password []byte) (*FileMeta, error
 	}
 }
 
-// ReKeyFile decrypts a file with oldPassword and re-encrypts it with newPassword in place.
-// If dest is empty, the source file is overwritten.
+// ReKeyFile decrypts a file with oldPassword and re-encrypts it with newPassword.
+// If dest is empty, the source file is overwritten in place.
+//
+// The in-place case (source == dest) is implemented as a write to a
+// sibling tempfile followed by Shred(source) + atomic rename. This
+// guarantees the source is preserved if the rekey fails partway: the
+// old behavior was to os.Create(dest) which truncates the file to
+// zero bytes before any decryption runs, leaving the user with an
+// empty file and a "wrong password" error.
 func ReKeyFile(source, dest string, oldPassword, newPassword []byte, config *Config) error {
 	if dest == "" {
 		dest = source
 	}
 
+	if source != dest {
+		srcFile, err := os.Open(source)
+		if err != nil {
+			return err
+		}
+		defer srcFile.Close() //nolint:errcheck
+		destFile, err := os.Create(dest)
+		if err != nil {
+			return err
+		}
+		defer destFile.Close() //nolint:errcheck
+		return ReKey(destFile, srcFile, oldPassword, newPassword, config)
+	}
+
+	// In-place: write to tempfile, shred the original, rename.
 	srcFile, err := os.Open(source)
 	if err != nil {
 		return err
 	}
 	defer srcFile.Close() //nolint:errcheck
-	destFile, err := os.Create(dest)
+
+	tmp, err := os.CreateTemp(filepath.Dir(source), ".cipherlock-rekey-*")
 	if err != nil {
 		return err
 	}
-	defer destFile.Close() //nolint:errcheck
+	tmpName := tmp.Name()
+	defer func() {
+		// Best-effort cleanup if we never rename (caller sees the
+		// error; we drop the partial tempfile).
+		_ = os.Remove(tmpName)
+	}()
 
-	return ReKey(destFile, srcFile, oldPassword, newPassword, config)
+	if err := ReKey(tmp, srcFile, oldPassword, newPassword, config); err != nil {
+		tmp.Close() //nolint:errcheck
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+
+	// Old file is no longer needed; best-effort overwrite. Failure
+	// to shred is non-fatal -- the rename still produces a correct
+	// output, just leaves the old ciphertext on disk.
+	_ = Shred(source)
+	return os.Rename(tmpName, source)
 }
