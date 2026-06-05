@@ -241,6 +241,15 @@ func EncryptStream(dst io.Writer, src io.Reader, password []byte, config *Config
 		config = DefaultConfig
 	}
 
+	// v0x05 stores the FileMeta in the cleartext header. That means
+	// anyone holding the ciphertext can read the original filename
+	// and modification time. If the caller really wants metadata
+	// attached, they should use EncryptStreamV2 (v0x06) which
+	// encrypts the metadata chunk under the same key as the data.
+	if config.FileMeta != nil {
+		return ErrV05MetaUnsupported
+	}
+
 	// Take a local copy so we never mutate the caller's config (or the shared
 	// DefaultConfig) under concurrent use.
 	cfg := *config
@@ -450,17 +459,15 @@ func readStreamV05Meta(src io.Reader) (*FileMeta, error) {
 	}, nil
 }
 
-// DecryptStreamMeta decrypts a stream-format cipherlock file and returns the FileMeta header.
-// The plaintext is written to dst while the metadata is returned to the caller.
+// DecryptStreamMeta decrypts a stream-format cipherlock file (v0x05, v0x06, or
+// v0x07) and returns the FileMeta attached at encrypt time. The plaintext is
+// streamed to dst. The returned *FileMeta is nil if the source had no metadata.
+//
+// This is the format-aware counterpart to DecryptWithMeta: it dispatches on
+// the version byte the same way, but is named after the legacy v0x05 helper
+// it replaced. New code should prefer DecryptWithMeta.
 func DecryptStreamMeta(dst io.Writer, src io.Reader, password []byte) (*FileMeta, error) {
-	var hdrMagic [4]byte
-	if _, err := io.ReadFull(src, hdrMagic[:]); err != nil {
-		return nil, ErrInvalidFormat
-	}
-	if hdrMagic != magic {
-		return nil, ErrInvalidFormat
-	}
-	return decryptStream(dst, src, password)
+	return DecryptWithMeta(dst, src, password)
 }
 
 func decryptStream(dst io.Writer, src io.Reader, password []byte) (*FileMeta, error) {

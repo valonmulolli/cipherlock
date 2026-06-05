@@ -31,6 +31,13 @@ var ErrAtLeastOnePassword = errors.New("cipherlock: at least one password requir
 // format version (v0x06 or v0x07) and the caller must supply a password to ReadStreamMetaWithPassword.
 var ErrEncryptedMeta = errors.New("cipherlock: file metadata is encrypted; password required")
 
+// ErrV05MetaUnsupported is returned by EncryptStream (v0x05) when a
+// FileMeta is supplied on the Config. v0x05 stores metadata in the
+// cleartext header, which leaks the original filename and modification
+// time to anyone holding the blob. Use EncryptStreamV2 (v0x06) when
+// metadata is required.
+var ErrV05MetaUnsupported = errors.New("cipherlock: EncryptStream (v0x05) cannot attach FileMeta; use EncryptStreamV2")
+
 const (
 	formatVersionV2          byte = 0x02
 	formatVersion            byte = 0x03

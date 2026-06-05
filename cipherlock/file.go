@@ -9,6 +9,10 @@ import (
 
 // EncryptFile encrypts a source file and writes the ciphertext to a destination file.
 // If dest is empty, the source path with a .encrypted suffix is used.
+//
+// When config.FileMeta is set the output is a v0x06 file so the metadata
+// chunk is encrypted (v0x05 would leak the original filename and mtime
+// in the cleartext header). Without FileMeta the output is v0x05.
 func EncryptFile(source, dest string, password []byte, config *Config) error {
 	if dest == "" {
 		dest = source + ".encrypted"
@@ -26,6 +30,9 @@ func EncryptFile(source, dest string, password []byte, config *Config) error {
 	}
 	defer destFile.Close() //nolint:errcheck
 
+	if config != nil && config.FileMeta != nil {
+		return EncryptStreamV2(destFile, srcFile, password, config)
+	}
 	return Encrypt(destFile, srcFile, password, config)
 }
 
