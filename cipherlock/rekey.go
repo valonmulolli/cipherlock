@@ -112,13 +112,6 @@ func ReKey(dst io.Writer, src io.Reader, oldPassword, newPassword []byte, config
 	return Encrypt(dst, &buf, newPassword, config)
 }
 
-// metaCapture holds the captured FileMeta for a streaming source.
-// Used by ReKey to peek the meta off a non-seekable stream and
-// re-attach it on the re-encrypt side.
-type metaCapture struct {
-	meta *FileMeta
-}
-
 // captureMeta reads the header + optional meta chunk from src and
 // returns the captured FileMeta. src is expected to be positioned
 // just after the magic+version bytes (since readStreamV2MetaOnly
