@@ -116,7 +116,7 @@ func decryptV2V3(dst io.Writer, src io.Reader, password []byte) error {
 		return err
 	}
 
-	ciphertext, err := io.ReadAll(src)
+	ciphertext, err := io.ReadAll(io.LimitReader(src, maxV04Body))
 	if err != nil {
 		return err
 	}
