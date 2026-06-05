@@ -21,10 +21,13 @@ type streamMultiHeader struct {
 	Recipients []recipientEntry
 }
 
-// maxRecipients bounds the number of recipient entries accepted in a v0x07 header
-// to prevent OOM via a maliciously crafted file. 1024 is generous for any real
-// use case (you almost never encrypt for a thousand recipients).
-const maxRecipients = 1024
+// maxRecipients bounds the number of recipient entries accepted in a v0x07 (or
+// v0x04) header to prevent DoS amplification. unsealFileKey runs Argon2id once
+// per recipient until one matches, so with the new caps (maxMemory=256 MiB,
+// maxTime=60) a wrong password with 1024 recipients would burn ~25 minutes of
+// CPU before returning ErrAuthFailed. 16 covers any realistic use case
+// (audit log + a few team members) and caps the worst case at ~25 seconds.
+const maxRecipients = 16
 
 func writeStreamMultiHeader(w io.Writer, entries []recipientEntry, flags byte) error {
 	write := func(data any) error {
