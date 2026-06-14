@@ -40,7 +40,7 @@ var ErrV05MetaUnsupported = errors.New("cipherlock: EncryptStream (v0x05) cannot
 
 const (
 	formatVersionV2          byte = 0x02
-	formatVersion            byte = 0x03
+	formatVersionV3          byte = 0x03
 	formatVersionMulti       byte = 0x04
 	formatVersionStream      byte = 0x05
 	formatVersionStreamV2    byte = 0x06
@@ -114,7 +114,7 @@ func readHeader(r io.Reader) (header, error) {
 	}
 
 	switch h.Version {
-	case formatVersion: // 0x03 with flags byte
+	case formatVersionV3: // 0x03 with flags byte
 		if err := binary.Read(r, binary.LittleEndian, &h.Flags); err != nil {
 			return h, ErrInvalidFormat
 		}

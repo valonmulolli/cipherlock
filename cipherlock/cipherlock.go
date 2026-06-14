@@ -61,7 +61,7 @@ func DecryptWithMeta(dst io.Writer, src io.Reader, password []byte) (*FileMeta, 
 	}
 
 	switch version {
-	case formatVersionV2, formatVersion:
+	case formatVersionV2, formatVersionV3:
 		// decryptV2V3 calls readHeader which re-reads magic+version.
 		combined := io.MultiReader(bytes.NewReader(prefixFor(5)), src)
 		return nil, decryptV2V3(dst, combined, password)

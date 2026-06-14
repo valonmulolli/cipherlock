@@ -1,6 +1,7 @@
 package cipherlock
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -217,7 +218,7 @@ func decryptStreamV2Meta(r io.Reader, aesgcm cipher.AEAD) (*FileMeta, error) {
 		return nil, ErrCorrupted
 	}
 	nameLen := int(binary.LittleEndian.Uint16(plaintext[:2]))
-	if len(plaintext) < 2+nameLen+16 {
+	if len(plaintext) < 2+nameLen+8+8 { // Size(8) + ModTime(8)
 		return nil, ErrCorrupted
 	}
 	name := string(plaintext[2 : 2+nameLen])
@@ -441,65 +442,17 @@ func DecryptStreamV2(dst io.Writer, src io.Reader, password []byte) (*FileMeta, 
 // reads + decrypts the metadata chunk using the supplied password and KDF parameters.
 // The version byte has already been consumed by the caller.
 func readStreamV2MetaOnly(r io.Reader, password []byte) (*FileMeta, error) {
-	var sh streamV2Header
-
-	read := func(data any) error {
-		return binary.Read(r, binary.LittleEndian, data)
+	// Prepend the version byte back; readStreamV2Header expects it.
+	sh, key, err := readStreamV2Header(
+		io.MultiReader(bytes.NewReader([]byte{formatVersionStreamV2}), r),
+		password,
+	)
+	if err != nil {
+		return nil, err
 	}
-
-	if err := read(&sh.Flags); err != nil {
-		return nil, ErrInvalidFormat
-	}
-
-	var saltLen uint16
-	if err := read(&saltLen); err != nil {
-		return nil, ErrInvalidFormat
-	}
-	if saltLen > maxSaltLen {
-		return nil, ErrCorrupted
-	}
-
-	sh.Salt = make([]byte, saltLen)
-	if _, err := io.ReadFull(r, sh.Salt); err != nil {
-		return nil, ErrInvalidFormat
-	}
-
-	if err := read(&sh.Time); err != nil {
-		return nil, ErrInvalidFormat
-	}
-	if sh.Time == 0 || sh.Time > maxTime {
-		return nil, ErrCorrupted
-	}
-	if err := read(&sh.Memory); err != nil {
-		return nil, ErrInvalidFormat
-	}
-	if sh.Memory == 0 || sh.Memory > maxMemory {
-		return nil, ErrCorrupted
-	}
-	if err := read(&sh.Threads); err != nil {
-		return nil, ErrInvalidFormat
-	}
-	if sh.Threads == 0 || sh.Threads > maxThreads {
-		return nil, ErrCorrupted
-	}
-	if err := read(&sh.KeyLen); err != nil {
-		return nil, ErrInvalidFormat
-	}
-	if sh.KeyLen == 0 || sh.KeyLen > maxKeyLen {
-		return nil, ErrCorrupted
-	}
-	if err := read(&sh.ChunkSize); err != nil {
-		return nil, ErrInvalidFormat
-	}
-	if sh.ChunkSize == 0 || sh.ChunkSize > maxChunkSize {
-		return nil, ErrCorrupted
-	}
-
-	key := argon2.IDKey(password, sh.Salt, sh.Time, sh.Memory, sh.Threads, sh.KeyLen)
 	if sh.Flags&flagHasMetadata == 0 {
 		return nil, nil
 	}
-
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err

@@ -46,16 +46,17 @@ var commonPasswords = map[string]bool{
 
 func estimateStrength(pwd []byte) strength {
 	s := strings.ToLower(string(pwd))
+	runes := []rune(s)
 
 	if commonPasswords[s] {
 		return veryWeak
 	}
-	if len(pwd) < 6 {
+	if len(runes) < 6 {
 		return veryWeak
 	}
 
 	var hasLower, hasUpper, hasDigit, hasSpecial, hasSpace bool
-	for _, c := range s {
+	for _, c := range runes {
 		switch {
 		case unicode.IsLower(c):
 			hasLower = true
@@ -87,12 +88,12 @@ func estimateStrength(pwd []byte) strength {
 		charsetSize += 1
 	}
 
-	entropy := float64(len(pwd)) * math.Log2(float64(charsetSize))
+	entropy := float64(len(runes)) * math.Log2(float64(charsetSize))
 
 	penalty := 1.0
 	hasRepeats := false
-	for i := 2; i < len(pwd); i++ {
-		if pwd[i] == pwd[i-1] && pwd[i] == pwd[i-2] {
+	for i := 2; i < len(runes); i++ {
+		if runes[i] == runes[i-1] && runes[i] == runes[i-2] {
 			hasRepeats = true
 			break
 		}
@@ -102,12 +103,12 @@ func estimateStrength(pwd []byte) strength {
 	}
 
 	hasSeq := false
-	for i := 2; i < len(pwd); i++ {
-		if pwd[i]-pwd[i-1] == 1 && pwd[i-1]-pwd[i-2] == 1 {
+	for i := 2; i < len(runes); i++ {
+		if runes[i]-runes[i-1] == 1 && runes[i-1]-runes[i-2] == 1 {
 			hasSeq = true
 			break
 		}
-		if pwd[i-2]-pwd[i-1] == 1 && pwd[i-1]-pwd[i] == 1 {
+		if runes[i-2]-runes[i-1] == 1 && runes[i-1]-runes[i] == 1 {
 			hasSeq = true
 			break
 		}
