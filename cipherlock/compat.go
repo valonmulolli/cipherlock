@@ -11,6 +11,7 @@ import (
 
 const (
 	v1NonceSize  = 12
+	v1TagSize    = 16
 	v1Iterations = 4096
 	v1KeyLen     = 32
 )
@@ -24,7 +25,7 @@ func DecryptFileV1(source, dest string, password []byte) error {
 		return err
 	}
 
-	if len(ciphertext) < v1NonceSize {
+	if len(ciphertext) < v1NonceSize+v1TagSize {
 		return ErrInvalidFormat
 	}
 

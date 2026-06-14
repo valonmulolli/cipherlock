@@ -6,7 +6,12 @@ import (
 )
 
 // Shred securely overwrites a file with random data followed by zeros, then removes it.
+// Each pass is fsynced before the next step to flush page cache.
 // This helps prevent recovery of sensitive data from disk.
+//
+// Note: Shred is best-effort. Copy-on-write filesystems (btrfs, ZFS), flash
+// translation layers on SSDs, and wear-leveling NAND may retain stale copies
+// of the overwritten data despite the sync.
 func Shred(path string) error {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -41,6 +46,7 @@ func Shred(path string) error {
 		remaining -= writeLen
 	}
 
+	f.Sync()
 	f.Close() //nolint:errcheck
 
 	zeros := make([]byte, 4096)
@@ -61,5 +67,6 @@ func Shred(path string) error {
 		remaining -= writeLen
 	}
 
+	f.Sync()
 	return os.Remove(path)
 }
