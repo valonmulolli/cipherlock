@@ -1,4 +1,4 @@
-name: CI
+name: ci
 
 on:
   push:
@@ -7,34 +7,23 @@ on:
     branches: [master]
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        go-version: ['1.25', '1.26']
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: ${{ matrix.go-version }}
-          cache: true
-
-      - run: go test ./... -count=1 -timeout 120s
-
-      - run: go vet ./...
-
-  lint:
+  ci:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
-          cache: true
+          go-version: "1.25"
+          check-latest: true
 
-      - uses: golangci/golangci-lint-action@v9
+      - name: Lint
+        uses: golangci/golangci-lint-action@v6
         with:
           version: v2.11
+
+      - name: Test
+        run: go test -race -count=1 -timeout=600s ./...
+
+      - name: Benchmark
+        run: go test -bench=. -benchmem -count=1 -run='^$$' -timeout=600s ./cipherlock/...
