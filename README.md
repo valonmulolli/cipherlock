@@ -28,7 +28,7 @@ cipherlock is a Go library and CLI tool for encrypting files and directories usi
 - **Password strength estimation**: Rates password entropy from "very weak" to "very strong" on encrypt/rekey.
 - **Saved config profiles**: Store and reuse Argon2id parameter sets with `config set-profile` / `--profile`.
 - **KDF progress indicator**: "Deriving key..." throbber and file-size progress bars during encrypt/decrypt.
-- **Context-aware library API**: `EncryptContext`, `DecryptContext`, `EncryptStreamContext` — cancel long operations via Go contexts.
+- **Context-aware library API**: `EncryptContext`, `DecryptContext`, `DecryptWithMetaContext`, `EncryptStreamContext` — cancel long operations via Go contexts.
 - **Sentinel error types**: `ErrAuthFailed`, `ErrChecksumMismatch`, `ErrCorrupted` — programmatic error handling instead of string matching.
 - **Encrypted-metadata streaming (v0x06)**: Optional `FileMeta` is stored as an encrypted chunk so the original filename and size are not visible without the password.
 - **Streaming multi-recipient (v0x07)**: Multi-recipient encryption that streams the plaintext in fixed-size chunks. No upper file size limit, even with `--recipient` flags.
@@ -196,7 +196,15 @@ err := cipherlock.EncryptContext(ctx, &buf, someReader, password, nil)
 // returns context.DeadlineExceeded if KDF or encryption takes too long
 ```
 
-Available context variants: `EncryptContext`, `DecryptContext`, `EncryptStreamContext`, `DecryptStreamContext`, `EncryptMultiContext`.
+To recover metadata alongside decryption:
+
+```go
+var buf bytes.Buffer
+meta, err := cipherlock.DecryptWithMetaContext(ctx, &buf, someReader, password)
+// meta is non-nil for v0x06/v0x07 sources with attached FileMeta
+```
+
+Available context variants: `EncryptContext`, `DecryptContext`, `DecryptWithMetaContext`, `EncryptStreamContext`, `DecryptStreamContext`, `EncryptMultiContext`, `EncryptStreamV2Context`, `DecryptStreamV2Context`, `EncryptStreamMultiContext`, `DecryptStreamMultiContext`.
 
 ### Error handling with sentinel errors
 
