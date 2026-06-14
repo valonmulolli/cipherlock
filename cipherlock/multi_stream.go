@@ -427,6 +427,9 @@ func decryptStreamMultiBody(dst io.Writer, src io.Reader, fileKey []byte, flags 
 // DecryptStreamMulti handles the v0x07 streaming multi-recipient body. The magic
 // header and version byte have already been consumed; r contains the recipient
 // list followed by the chunked body. Returns the FileMeta when present.
+//
+// It returns ErrAuthFailed on wrong password or tampered ciphertext, or
+// ErrCorrupted for malformed input.
 func DecryptStreamMulti(dst io.Writer, src io.Reader, password []byte) (*FileMeta, error) {
 	h, err := readStreamMultiHeader(src)
 	if err != nil {
@@ -448,6 +451,9 @@ func DecryptStreamMulti(dst io.Writer, src io.Reader, password []byte) (*FileMet
 
 // DecryptStreamMultiFromReader is a convenience wrapper for DecryptStreamMulti that
 // reads and validates the magic + version prefix.
+//
+// It returns ErrInvalidFormat if src does not start with the cipherlock magic,
+// or ErrVersionMismatch for an unrecognized version.
 func DecryptStreamMultiFromReader(dst io.Writer, src io.Reader, password []byte) (*FileMeta, error) {
 	var hdrMagic [4]byte
 	if _, err := io.ReadFull(src, hdrMagic[:]); err != nil {

@@ -236,6 +236,10 @@ func encryptStream(dst io.Writer, src io.Reader, key []byte, chunkSize int, hash
 // EncryptStream encrypts src using password with a streaming (chunked) format.
 // It supports large data sizes by processing data in chunks. The config controls Argon2
 // parameters, chunk size, and optional checksumming.
+//
+// It returns ErrV05MetaUnsupported when config.FileMeta is non-nil (use
+// EncryptStreamV2 for metadata), or a ChunkSize bound error when
+// config.ChunkSize exceeds maxChunkSize.
 func EncryptStream(dst io.Writer, src io.Reader, password []byte, config *Config) error {
 	if config == nil {
 		config = DefaultConfig
@@ -296,6 +300,11 @@ func EncryptStream(dst io.Writer, src io.Reader, password []byte, config *Config
 
 // DecryptStream decrypts a stream-format cipherlock file from src and writes plaintext to dst.
 // It is a convenience wrapper around DecryptStreamMeta that discards the FileMeta.
+//
+// It returns ErrInvalidFormat if src does not start with the cipherlock magic,
+// ErrVersionMismatch for an unrecognized version, ErrAuthFailed on wrong
+// password or tampered ciphertext, or ErrChecksumMismatch if the embedded
+// checksum does not match.
 func DecryptStream(dst io.Writer, src io.Reader, password []byte) error {
 	_, err := DecryptStreamMeta(dst, src, password)
 	return err
@@ -472,6 +481,9 @@ func readStreamV05Meta(src io.Reader) (*FileMeta, error) {
 // This is the format-aware counterpart to DecryptWithMeta: it dispatches on
 // the version byte the same way, but is named after the legacy v0x05 helper
 // it replaced. New code should prefer DecryptWithMeta.
+//
+// It returns ErrInvalidFormat, ErrVersionMismatch, ErrAuthFailed, or
+// ErrChecksumMismatch on failure.
 func DecryptStreamMeta(dst io.Writer, src io.Reader, password []byte) (*FileMeta, error) {
 	return DecryptWithMeta(dst, src, password)
 }

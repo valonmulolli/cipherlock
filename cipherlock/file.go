@@ -13,6 +13,9 @@ import (
 // When config.FileMeta is set the output is a v0x06 file so the metadata
 // chunk is encrypted (v0x05 would leak the original filename and mtime
 // in the cleartext header). Without FileMeta the output is v0x05.
+//
+// It returns errors from os.Open/os.Create, or any error returned by
+// Encrypt or EncryptStreamV2 (see those functions for details).
 func EncryptFile(source, dest string, password []byte, config *Config) error {
 	if dest == "" {
 		dest = source + ".encrypted"
@@ -38,6 +41,9 @@ func EncryptFile(source, dest string, password []byte, config *Config) error {
 
 // DecryptFile decrypts a source file and writes the plaintext to a destination file.
 // If dest is empty, the .encrypted or .cipherlock suffix is stripped, or .decrypted is appended.
+//
+// It returns errors from os.Open/os.Create, or ErrInvalidFormat, ErrVersionMismatch,
+// ErrAuthFailed, or ErrChecksumMismatch.
 func DecryptFile(source, dest string, password []byte) error {
 	if dest == "" {
 		dest = defaultDecryptPath(source)
@@ -61,6 +67,9 @@ func DecryptFile(source, dest string, password []byte) error {
 // DecryptFileWithMeta is the metadata-aware form of DecryptFile. The
 // returned *FileMeta is non-nil only when the source was a v0x06 or v0x07
 // container with a FileMeta attached.
+//
+// It returns errors from os.Open/os.Create, or any error returned by
+// DecryptWithMeta (see that function for details).
 func DecryptFileWithMeta(source, dest string, password []byte) (*FileMeta, error) {
 	if dest == "" {
 		dest = defaultDecryptPath(source)

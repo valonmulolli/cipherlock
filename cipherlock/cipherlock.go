@@ -35,6 +35,11 @@ func Decrypt(dst io.Writer, src io.Reader, password []byte) error {
 // v0x07 and had a FileMeta attached; v0x02 through v0x05 return nil. It
 // exists so that downstream code can recover the original filename and
 // modification time without an extra ReadStreamMetaWithPassword call.
+//
+// It returns ErrInvalidFormat if src does not start with the cipherlock magic,
+// ErrVersionMismatch for an unrecognized format version, ErrAuthFailed on
+// wrong password or tampered ciphertext, or ErrChecksumMismatch if the
+// embedded SHA-256 checksum does not match the decrypted plaintext.
 func DecryptWithMeta(dst io.Writer, src io.Reader, password []byte) (*FileMeta, error) {
 	var hdrMagic [4]byte
 	if _, err := io.ReadFull(src, hdrMagic[:]); err != nil {

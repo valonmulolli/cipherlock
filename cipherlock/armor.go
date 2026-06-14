@@ -20,11 +20,15 @@ const (
 
 var (
 	ErrNotArmored = errors.New("cipherlock: not an armored file")
-
-	MagicArmorHeader = []byte(armorHeader)
 )
 
+// MagicArmorHeader is the ASCII armor header line as a byte slice.
+// It can be used to detect whether a byte stream uses the cipherlock
+// armored format before calling Unarmor or IsArmored.
+var MagicArmorHeader = []byte(armorHeader)
+
 // Armor writes data to w in ASCII-armor format (base64 encoded with header/footer lines).
+// It returns any write error from the underlying io.Writer.
 func Armor(w io.Writer, data []byte) error {
 	if _, err := fmt.Fprintln(w, armorHeader); err != nil {
 		return err
@@ -52,6 +56,9 @@ func Armor(w io.Writer, data []byte) error {
 // Unarmor reads ASCII-armor encoded data from r and returns the decoded bytes.
 // It buffers the entire stream into memory; for large armored inputs use
 // NewUnarmorReader to stream the decoded bytes into a downstream reader.
+//
+// It returns ErrNotArmored if the input does not contain a valid armor header,
+// or a base64 decode error if the encapsulated data is malformed.
 func Unarmor(r io.Reader) ([]byte, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
@@ -62,6 +69,9 @@ func Unarmor(r io.Reader) ([]byte, error) {
 }
 
 // UnarmorBytes decodes ASCII-armor encoded data and returns the original bytes.
+//
+// It returns ErrNotArmored if the data does not contain a valid armor header,
+// or a base64 decode error if the encapsulated portion is malformed.
 func UnarmorBytes(data []byte) ([]byte, error) {
 	text := string(data)
 	lines := strings.Split(text, "\n")

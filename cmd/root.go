@@ -17,6 +17,10 @@ It supports single files, entire directories, and stdin/stdout pipe mode.`,
 	SilenceUsage:  true,
 }
 
+// Execute runs the cipherlock CLI, dispatching to the appropriate
+// subcommand (encrypt, decrypt, rekey, completion). It returns an
+// error when the command fails; the root command itself is configured
+// to suppress printing usage on errors via SilenceUsage.
 func Execute() error {
 	return rootCmd.Execute()
 }

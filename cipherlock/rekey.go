@@ -79,6 +79,10 @@ func (sw *safeWriter) Discard() {
 // For all streaming inputs the operation is performed without buffering
 // the entire plaintext. For legacy v0x02/v0x03/v0x04 inputs the plaintext
 // is held in memory during re-encryption.
+//
+// It returns ErrInvalidFormat, ErrVersionMismatch, ErrAuthFailed,
+// ErrChecksumMismatch, or ErrCorrupted from the decrypt step, or any
+// encrypt error from the re-encrypt step.
 func ReKey(dst io.Writer, src io.Reader, oldPassword, newPassword []byte, config *Config) error {
 	var hdrMagic [4]byte
 	if _, err := io.ReadFull(src, hdrMagic[:]); err != nil {
@@ -204,6 +208,9 @@ func captureMeta(src io.Reader, version byte, password []byte) (*FileMeta, error
 // old behavior was to os.Create(dest) which truncates the file to
 // zero bytes before any decryption runs, leaving the user with an
 // empty file and a "wrong password" error.
+//
+// It returns errors from os.Open/os.Create, or any error from ReKey
+// (ErrInvalidFormat, ErrAuthFailed, etc.).
 func ReKeyFile(source, dest string, oldPassword, newPassword []byte, config *Config) error {
 	if dest == "" {
 		dest = source

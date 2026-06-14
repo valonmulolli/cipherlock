@@ -383,6 +383,8 @@ func decryptStreamV2(dst io.Writer, src io.Reader, password []byte) (*FileMeta, 
 // v0x05, the optional FileMeta is stored as an encrypted chunk so it is not visible
 // without the password. Use this when you need streaming encryption and want to keep
 // the original filename and size confidential.
+//
+// It returns a ChunkSize bound error when config.ChunkSize exceeds maxChunkSize.
 func EncryptStreamV2(dst io.Writer, src io.Reader, password []byte, config *Config) error {
 	if config == nil {
 		config = DefaultConfig
@@ -433,6 +435,8 @@ func EncryptStreamV2(dst io.Writer, src io.Reader, password []byte, config *Conf
 
 // DecryptStreamV2 decrypts a v0x06 stream-format cipherlock file. The returned FileMeta
 // is non-nil only if the source file was encrypted with a FileMeta attached.
+//
+// It returns ErrInvalidFormat, ErrAuthFailed, ErrCorrupted, or ErrChecksumMismatch.
 func DecryptStreamV2(dst io.Writer, src io.Reader, password []byte) (*FileMeta, error) {
 	var hdrMagic [4]byte
 	if _, err := io.ReadFull(src, hdrMagic[:]); err != nil {
