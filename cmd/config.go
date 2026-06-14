@@ -151,7 +151,29 @@ func saveProfileStore(store *profileStore) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0600)
+	// Write to a tempfile in the same directory then rename atomically,
+	// so a concurrent reader never sees a partially-written file.
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".profiles-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return os.Chmod(path, 0600)
 }
 
 func lookupProfile(name string) (*cipherlock.Profile, error) {
