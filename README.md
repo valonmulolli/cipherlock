@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/valonmulolli/cipherlock/actions/workflows/ci.yml/badge.svg)](https://github.com/valonmulolli/cipherlock/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/valonmulolli/cipherlock.svg)](https://pkg.go.dev/github.com/valonmulolli/cipherlock)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/valonmulolli/cipherlock)](https://go.dev/dl/)
+[![License](https://img.shields.io/github/license/valonmulolli/cipherlock)](LICENSE)
 
 AES-256-GCM file encryption with Argon2id key derivation.
 
