@@ -24,6 +24,8 @@ var (
 	recipientPwds []string
 	profileName   string
 	outDir        string
+	keychainFlag  bool
+	saveKeychain  bool
 )
 
 var encryptCmd = &cobra.Command{
@@ -51,7 +53,19 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 		var passwords [][]byte
 		var err error
 
-		if len(recipientPwds) > 0 {
+		if keychainFlag {
+			if keyFilePath != "" {
+				return fmt.Errorf("--keychain and --key-file are mutually exclusive")
+			}
+			if len(recipientPwds) > 0 {
+				return fmt.Errorf("--keychain cannot be used with --recipient")
+			}
+			pwdStr, err := keychainGet(getKeychainAccount(args[0]))
+			if err != nil {
+				return fmt.Errorf("keychain lookup failed: %w", err)
+			}
+			passwords = [][]byte{[]byte(pwdStr)}
+		} else if len(recipientPwds) > 0 {
 			for _, r := range recipientPwds {
 				passwords = append(passwords, []byte(r))
 			}
@@ -146,6 +160,7 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			}
 		}
 
+		var destPaths []string
 		for _, src := range args {
 			info, err := os.Stat(src)
 			if err != nil {
@@ -169,6 +184,11 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			if err := encryptFile(src, dest, info, passwords, config); err != nil {
 				return err
 			}
+			destPaths = append(destPaths, dest)
+		}
+
+		if saveKeychain {
+			savePasswordsToKeychain(destPaths, passwords)
 		}
 
 		return nil
@@ -305,6 +325,8 @@ func init() {
 	encryptCmd.Flags().StringArrayVar(&recipientPwds, "recipient", nil, "additional recipient password (can be specified multiple times)")
 	encryptCmd.Flags().StringVar(&profileName, "profile", "", "use a saved configuration profile")
 	encryptCmd.Flags().StringVar(&outDir, "out-dir", "", "output directory for batch encryption")
+	encryptCmd.Flags().BoolVar(&keychainFlag, "keychain", false, "read password from system keychain")
+	encryptCmd.Flags().BoolVar(&saveKeychain, "save-keychain", false, "save password to system keychain after encryption")
 }
 
 func generatePassword(length int) ([]byte, error) {

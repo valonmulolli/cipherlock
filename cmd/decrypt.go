@@ -52,7 +52,16 @@ plaintext to stdout.`,
 
 		var password []byte
 		var err error
-		if decryptKeyFile != "" {
+		if keychainFlag {
+			if decryptKeyFile != "" {
+				return fmt.Errorf("--keychain and --key-file are mutually exclusive")
+			}
+			pwdStr, err := keychainGet(getKeychainAccount(args[0]))
+			if err != nil {
+				return fmt.Errorf("keychain lookup failed: %w", err)
+			}
+			password = []byte(pwdStr)
+		} else if decryptKeyFile != "" {
 			password, err = os.ReadFile(decryptKeyFile)
 			if err != nil {
 				return fmt.Errorf("reading key file: %w", err)
@@ -70,6 +79,7 @@ plaintext to stdout.`,
 			return decryptStdin(password)
 		}
 
+		var destPaths []string
 		for _, src := range args {
 			info, err := os.Stat(src)
 			if err != nil {
@@ -90,6 +100,11 @@ plaintext to stdout.`,
 			if err := decryptFile(src, dest, info, password); err != nil {
 				return err
 			}
+			destPaths = append(destPaths, dest)
+		}
+
+		if saveKeychain {
+			savePasswordsToKeychain(destPaths, [][]byte{password})
 		}
 
 		return nil
@@ -263,4 +278,6 @@ func init() {
 	decryptCmd.Flags().StringVarP(&decryptOutput, "output", "o", "", "output file path")
 	decryptCmd.Flags().StringVar(&decryptKeyFile, "key-file", "", "read password from file instead of prompting")
 	decryptCmd.Flags().StringVar(&decryptOutDir, "out-dir", "", "output directory for batch decryption")
+	decryptCmd.Flags().BoolVar(&keychainFlag, "keychain", false, "read password from system keychain")
+	decryptCmd.Flags().BoolVar(&saveKeychain, "save-keychain", false, "save password to system keychain after decryption")
 }
