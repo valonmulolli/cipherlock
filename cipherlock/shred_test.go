@@ -44,3 +44,37 @@ func TestShredNonexistent(t *testing.T) {
 		t.Fatal("expected error for nonexistent file")
 	}
 }
+
+func TestShredOverwritesContent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secrets.txt")
+	content := []byte("sensitive secret data")
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	fd, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fd.Close()
+
+	if err := Shred(path); err != nil {
+		t.Fatalf("Shred: %v", err)
+	}
+
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("file should not exist after shred")
+	}
+
+	buf := make([]byte, len(content))
+	if _, err := fd.ReadAt(buf, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	for i, b := range buf {
+		if b != 0 {
+			t.Fatalf("byte %d not zero after shred: got %d", i, b)
+		}
+	}
+}

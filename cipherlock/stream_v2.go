@@ -401,6 +401,12 @@ func EncryptStreamV2(dst io.Writer, src io.Reader, password []byte, config *Conf
 		return fmt.Errorf("cipherlock: ChunkSize %d exceeds maxChunkSize %d", chunkSize, maxChunkSize)
 	}
 	cfg.ChunkSize = chunkSize
+	if cfg.SaltLen <= 0 {
+		cfg.SaltLen = DefaultConfig.SaltLen
+	}
+	if cfg.KeyLen <= 0 {
+		cfg.KeyLen = DefaultConfig.KeyLen
+	}
 
 	var hasher hash.Hash
 	if config.Checksum {

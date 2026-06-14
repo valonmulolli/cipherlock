@@ -9,31 +9,26 @@ import (
 	"testing"
 )
 
-func TestTarSymlinkEntriesSkipped(t *testing.T) {
+func TestTarSymlinkExtracted(t *testing.T) {
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "extract")
 
-	// The current code silently skips TypeSymlink entries. Verify
-	// the extraction still succeeds (the symlink is just dropped).
 	var buf bytes.Buffer
 	gw := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gw)
 
 	if err := tw.WriteHeader(&tar.Header{
-		Typeflag: tar.TypeSymlink,
-		Name:     "outdir",
-		Linkname: "../../tmp",
+		Typeflag: tar.TypeDir,
+		Name:     "subdir/",
 	}); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := tw.WriteHeader(&tar.Header{
-		Typeflag: tar.TypeReg,
-		Name:     "outdir/evil.sh",
-		Size:     4,
+		Typeflag: tar.TypeSymlink,
+		Name:     "mylink",
+		Linkname: "subdir",
 	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tw.Write([]byte("evil")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -41,7 +36,135 @@ func TestTarSymlinkEntriesSkipped(t *testing.T) {
 	gw.Close()
 
 	if err := untarGzDir(dest, &buf); err != nil {
-		t.Fatalf("symlink entries are dropped, extraction should succeed: %v", err)
+		t.Fatalf("symlink extraction failed: %v", err)
+	}
+
+	linkPath := filepath.Join(dest, "mylink")
+	linkTarget, err := os.Readlink(linkPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if linkTarget != "subdir" {
+		t.Fatalf("got link target %q, want %q", linkTarget, "subdir")
+	}
+}
+
+func TestTarSymlinkAbsoluteOutsideRejected(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "extract")
+
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	if err := tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeSymlink,
+		Name:     "outlink",
+		Linkname: "/etc/passwd",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	tw.Close()
+	gw.Close()
+
+	err := untarGzDir(dest, &buf)
+	if err == nil {
+		t.Fatal("expected error for absolute symlink outside dest, got nil")
+	}
+}
+
+func TestTarSymlinkDotDotOutsideRejected(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "extract")
+
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	if err := tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeSymlink,
+		Name:     "outlink",
+		Linkname: "../../etc/passwd",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	tw.Close()
+	gw.Close()
+
+	err := untarGzDir(dest, &buf)
+	if err == nil {
+		t.Fatal("expected error for ../ symlink outside dest, got nil")
+	}
+}
+
+func TestTarSymlinkInsideAllowed(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "extract")
+
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	if err := tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeSymlink,
+		Name:     "inner",
+		Linkname: ".",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	tw.Close()
+	gw.Close()
+
+	if err := untarGzDir(dest, &buf); err != nil {
+		t.Fatalf("inner symlink should be allowed: %v", err)
+	}
+
+	linkPath := filepath.Join(dest, "inner")
+	linkTarget, err := os.Readlink(linkPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if linkTarget != "." {
+		t.Fatalf("got link target %q, want %q", linkTarget, ".")
+	}
+}
+
+func TestTarHardLinkRejectedOutside(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "extract")
+
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	if err := tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeReg,
+		Name:     "safe.txt",
+		Size:     4,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte("safe")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeLink,
+		Name:     "escape",
+		Linkname: "../../tmp/outside",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	tw.Close()
+	gw.Close()
+
+	err := untarGzDir(dest, &buf)
+	if err == nil {
+		t.Fatal("expected error for hard link outside dest, got nil")
 	}
 }
 

@@ -208,6 +208,16 @@ func EncryptMulti(dst io.Writer, src io.Reader, passwords [][]byte, config *Conf
 		return ErrAtLeastOnePassword
 	}
 
+	cfg := *config
+	config = &cfg
+
+	if cfg.SaltLen <= 0 {
+		cfg.SaltLen = DefaultConfig.SaltLen
+	}
+	if cfg.KeyLen <= 0 {
+		cfg.KeyLen = DefaultConfig.KeyLen
+	}
+
 	plaintext, err := io.ReadAll(src)
 	if err != nil {
 		return err

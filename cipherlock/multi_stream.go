@@ -278,6 +278,12 @@ func EncryptStreamMulti(dst io.Writer, src io.Reader, passwords [][]byte, config
 		return fmt.Errorf("cipherlock: ChunkSize %d exceeds maxChunkSize %d", chunkSize, maxChunkSize)
 	}
 	cfg.ChunkSize = chunkSize
+	if cfg.SaltLen <= 0 {
+		cfg.SaltLen = DefaultConfig.SaltLen
+	}
+	if cfg.KeyLen <= 0 {
+		cfg.KeyLen = DefaultConfig.KeyLen
+	}
 
 	fileKey := make([]byte, 32)
 	if _, err := io.ReadFull(rand.Reader, fileKey); err != nil {

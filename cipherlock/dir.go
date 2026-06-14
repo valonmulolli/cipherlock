@@ -183,6 +183,37 @@ func untarGzDir(dest string, r io.Reader) error {
 			if err != nil {
 				return err
 			}
+		case tar.TypeSymlink:
+			linkTarget := header.Linkname
+			if filepath.IsAbs(linkTarget) {
+				cleanedLink := filepath.Clean(linkTarget)
+				if !pathHasPrefix(cleanedLink, destAbs) {
+					return fmt.Errorf("cipherlock: refusing symlink %q -> %q outside destination", header.Name, linkTarget)
+				}
+			} else {
+				resolvedTarget := filepath.Clean(filepath.Join(filepath.Dir(target), linkTarget))
+				if !pathHasPrefix(resolvedTarget, destAbs) {
+					return fmt.Errorf("cipherlock: refusing symlink %q -> %q outside destination", header.Name, linkTarget)
+				}
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+				return err
+			}
+			if err := os.Symlink(linkTarget, target); err != nil {
+				return err
+			}
+		case tar.TypeLink:
+			linkTarget := filepath.Join(destAbs, header.Linkname)
+			cleanedLink := filepath.Clean(linkTarget)
+			if !pathHasPrefix(cleanedLink, destAbs) {
+				return fmt.Errorf("cipherlock: refusing link %q -> %q outside destination", header.Name, header.Linkname)
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+				return err
+			}
+			if err := os.Link(cleanedLink, target); err != nil {
+				return err
+			}
 		}
 	}
 

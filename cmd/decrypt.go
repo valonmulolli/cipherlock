@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
@@ -18,26 +17,38 @@ import (
 var (
 	decryptOutput  string
 	decryptKeyFile string
+	decryptOutDir  string
 )
 
 var decryptCmd = &cobra.Command{
-	Use:   "decrypt [flags] <path>",
+	Use:   "decrypt [flags] <path> [<path>...]",
 	Short: "Decrypt a file",
-	Long: `Decrypt a file previously encrypted with cipherlock.
+	Long: `Decrypt one or more files previously encrypted with cipherlock.
 
 Supports both the current V2 format (Argon2id) and the legacy
 V1 format (PBKDF2+SHA1) for backward compatibility.
 
 If no output path is specified, the decrypted output strips the
 .encrypted or .cipherlock extension, or appends .decrypted.
+Use --out-dir to write all outputs to a specific directory.
 
 When <path> is "-", read encrypted data from stdin and write
 plaintext to stdout.`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		source := args[0]
-		out := decryptOutput
-		userSetOutput := out != ""
+		if len(args) == 0 {
+			return fmt.Errorf("requires at least one path argument")
+		}
+
+		if decryptOutDir != "" && decryptOutput != "" {
+			return fmt.Errorf("--output and --out-dir are mutually exclusive")
+		}
+		if inPlace && (decryptOutput != "" || decryptOutDir != "") {
+			return fmt.Errorf("--in-place is mutually exclusive with --output and --out-dir")
+		}
+		if decryptOutput != "" && len(args) > 1 {
+			return fmt.Errorf("--output cannot be used with multiple input files")
+		}
 
 		var password []byte
 		var err error
@@ -55,130 +66,130 @@ plaintext to stdout.`,
 			}
 		}
 
-		if source == "-" {
-			stat, _ := os.Stdout.Stat()
-			bar := progressbar.NewOptions64(
-				-1,
-				progressbar.OptionSetDescription("decrypting"),
-				progressbar.OptionSetWriter(os.Stderr),
-				progressbar.OptionShowBytes(true),
-				progressbar.OptionSetWidth(30),
-				progressbar.OptionThrottle(100),
-				progressbar.OptionOnCompletion(func() {
-					fmt.Fprint(os.Stderr, "\n")
-				}),
-			)
-
-			if stat != nil && (stat.Mode()&os.ModeCharDevice) != 0 {
-				bar = nil
-			}
-
-			stopKDF := showKDF()
-
-			if out == "" {
-				err = decryptFromReader(os.Stdout, os.Stdin, password)
-				stopKDF()
-				if bar != nil {
-					bar.Finish() //nolint:errcheck
-				}
-				if err != nil {
-					return err
-				}
-				return nil
-			}
-
-			f, err := os.Create(out)
-			if err != nil {
-				return err
-			}
-			defer f.Close()
-
-			err = decryptFromReader(f, os.Stdin, password)
-			stopKDF()
-			if bar != nil {
-				bar.Finish() //nolint:errcheck
-			}
-			if err != nil {
-				return err
-			}
-			return nil
+		if len(args) == 1 && args[0] == "-" {
+			return decryptStdin(password)
 		}
 
-		info, err := os.Stat(source)
+		for _, src := range args {
+			info, err := os.Stat(src)
+			if err != nil {
+				return err
+			}
+
+			dest := decryptOutput
+			if inPlace {
+				dest = src
+			} else if dest == "" {
+				if decryptOutDir != "" {
+					dest = filepath.Join(decryptOutDir, filepath.Base(defaultDecryptPath(src)))
+				} else {
+					dest = defaultDecryptPath(src)
+				}
+			}
+
+			if err := decryptFile(src, dest, info, password); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	},
+}
+
+func decryptStdin(password []byte) error {
+	out := decryptOutput
+	stopKDF := showKDF()
+
+	if out == "" {
+		err := decryptFromReader(os.Stdout, os.Stdin, password)
+		stopKDF()
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+
+	f, err := os.Create(out)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	err = decryptFromReader(f, os.Stdin, password)
+	stopKDF()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func decryptFile(srcPath, dstPath string, info os.FileInfo, password []byte) error {
+	if inPlace {
+		tmp := srcPath + ".tmp"
+		destFile, err := os.Create(tmp)
 		if err != nil {
 			return err
 		}
 
-		if out == "" {
-			out = defaultDecryptPath(source)
-		}
-
-		if inPlace {
-			tmp := source + ".tmp"
-			destFile, err := os.Create(tmp)
-			if err != nil {
-				return err
-			}
-
-			srcFile, err := os.Open(source)
-			if err != nil {
-				return err
-			}
-
-			srcReader := progressReader(srcFile, info.Size(), "decrypting")
-			stopKDF := showKDF()
-
-			err = decryptFromReader(destFile, srcReader, password)
-			srcFile.Close()  //nolint:errcheck
-			destFile.Close() //nolint:errcheck
-			stopKDF()
-			if err != nil {
-				os.Remove(tmp) //nolint:errcheck
-				if isAuthError(err) {
-					return errors.New("decryption failed: wrong password or corrupted data")
-				}
-				return err
-			}
-
-			if err := cipherlock.Shred(source); err != nil {
-				os.Remove(tmp) //nolint:errcheck
-				return err
-			}
-			return os.Rename(tmp, source)
-		}
-
-		destFile, err := os.Create(out)
+		srcFile, err := os.Open(srcPath)
 		if err != nil {
+			destFile.Close()
 			return err
 		}
-		defer destFile.Close() //nolint:errcheck
-
-		srcFile, err := os.Open(source)
-		if err != nil {
-			return err
-		}
-		defer srcFile.Close() //nolint:errcheck
 
 		srcReader := progressReader(srcFile, info.Size(), "decrypting")
 		stopKDF := showKDF()
 
-		if info.Size() == 0 {
-			err = decryptFromReader(destFile, srcFile, password)
-		} else {
-			err = decryptFromReader(destFile, srcReader, password)
-		}
+		err = decryptFromReader(destFile, srcReader, password)
+		srcFile.Close()  //nolint:errcheck
+		destFile.Close() //nolint:errcheck
 		stopKDF()
 		if err != nil {
-			os.Remove(out) //nolint:errcheck
+			os.Remove(tmp) //nolint:errcheck
 			if isAuthError(err) {
 				return errors.New("decryption failed: wrong password or corrupted data")
 			}
 			return err
 		}
 
-		restoreMeta(source, out, userSetOutput)
-		return nil
-	},
+		if err := cipherlock.Shred(srcPath); err != nil {
+			os.Remove(tmp) //nolint:errcheck
+			return err
+		}
+		return os.Rename(tmp, srcPath)
+	}
+
+	destFile, err := os.Create(dstPath)
+	if err != nil {
+		return err
+	}
+	defer destFile.Close() //nolint:errcheck
+
+	srcFile, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close() //nolint:errcheck
+
+	srcReader := progressReader(srcFile, info.Size(), "decrypting")
+	stopKDF := showKDF()
+
+	if info.Size() == 0 {
+		err = decryptFromReader(destFile, srcFile, password)
+	} else {
+		err = decryptFromReader(destFile, srcReader, password)
+	}
+	stopKDF()
+	if err != nil {
+		os.Remove(dstPath) //nolint:errcheck
+		if isAuthError(err) {
+			return errors.New("decryption failed: wrong password or corrupted data")
+		}
+		return err
+	}
+
+	restoreMeta(srcPath, dstPath, password, decryptOutput != "")
+	return nil
 }
 
 func decryptFromReader(w io.Writer, r io.Reader, password []byte) error {
@@ -188,8 +199,6 @@ func decryptFromReader(w io.Writer, r io.Reader, password []byte) error {
 	}
 
 	if ok {
-		// Stream the base64-decoded bytes into Decrypt instead of
-		// buffering the entire armored payload in memory.
 		ur, err := cipherlock.NewUnarmorReader(reader)
 		if err != nil {
 			return err
@@ -200,7 +209,7 @@ func decryptFromReader(w io.Writer, r io.Reader, password []byte) error {
 	return cipherlock.Decrypt(w, reader, password)
 }
 
-func restoreMeta(encPath, decPath string, userSetOutput bool) {
+func restoreMeta(encPath, decPath string, password []byte, userSetOutput bool) {
 	encFile, err := os.Open(encPath)
 	if err != nil {
 		return
@@ -209,7 +218,15 @@ func restoreMeta(encPath, decPath string, userSetOutput bool) {
 
 	meta, err := cipherlock.ReadStreamMeta(encFile)
 	if err != nil {
-		return
+		if errors.Is(err, cipherlock.ErrEncryptedMeta) && len(password) > 0 {
+			encFile.Seek(0, 0) //nolint:errcheck
+			meta, err = cipherlock.ReadStreamMetaWithPassword(encFile, password)
+			if err != nil {
+				return
+			}
+		} else {
+			return
+		}
 	}
 	if meta == nil {
 		return
@@ -245,4 +262,5 @@ func init() {
 	rootCmd.AddCommand(decryptCmd)
 	decryptCmd.Flags().StringVarP(&decryptOutput, "output", "o", "", "output file path")
 	decryptCmd.Flags().StringVar(&decryptKeyFile, "key-file", "", "read password from file instead of prompting")
+	decryptCmd.Flags().StringVar(&decryptOutDir, "out-dir", "", "output directory for batch decryption")
 }

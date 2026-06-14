@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
-	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
 
 	"github.com/valonmulolli/cipherlock/cipherlock"
@@ -23,25 +23,31 @@ var (
 	checksumFlag  bool
 	recipientPwds []string
 	profileName   string
+	outDir        string
 )
 
 var encryptCmd = &cobra.Command{
-	Use:   "encrypt [flags] <path>",
+	Use:   "encrypt [flags] <path> [<path>...]",
 	Short: "Encrypt a file or directory",
-	Long: `Encrypt a file or entire directory.
+	Long: `Encrypt one or more files, or a single directory.
 
 If <path> is a regular file, it is encrypted with AES-256-GCM.
 If <path> is a directory, it is archived (tar+gzip) before encryption.
+If multiple paths are given, they are all encrypted with the same password.
 
 If no output path is specified, the encrypted output is written to
 <path>.encrypted for files or <path>.cipherlock for directories.
+Use --out-dir to write all outputs to a specific directory.
 Use --in-place to overwrite the source after successful encryption.
 Use --gen-password to generate a cryptographically random password.
 
 When <path> is "-", read from stdin and write encrypted data to stdout.`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		source := args[0]
+		if len(args) == 0 {
+			return fmt.Errorf("requires at least one path argument")
+		}
+
 		var passwords [][]byte
 		var err error
 
@@ -115,131 +121,156 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			config.ApplyProfile(profile)
 		}
 
-		if source != "-" {
-			if st, stErr := os.Stat(source); stErr == nil && !st.IsDir() {
-				config.FileMeta = &cipherlock.FileMeta{
-					Name:    st.Name(),
-					Size:    st.Size(),
-					ModTime: st.ModTime(),
-				}
-			}
-		}
-
-		out := outputPath
-		destIsSet := out != ""
-
-		if source == "-" {
-			if !destIsSet {
-				out = ""
-			}
-			stat, _ := os.Stdout.Stat()
-			bar := progressbar.NewOptions64(
-				-1,
-				progressbar.OptionSetDescription("encrypting"),
-				progressbar.OptionSetWriter(os.Stderr),
-				progressbar.OptionShowBytes(true),
-				progressbar.OptionSetWidth(30),
-				progressbar.OptionThrottle(100),
-				progressbar.OptionOnCompletion(func() {
-					fmt.Fprint(os.Stderr, "\n")
-				}),
-			)
-
-			if stat != nil && (stat.Mode()&os.ModeCharDevice) != 0 {
-				bar = nil
-			}
-
-			stopKDF := showKDF()
-
-			if out == "" {
-				err = encryptToWriter(os.Stdout, os.Stdin, passwords, config)
-				stopKDF()
-				if bar != nil {
-					bar.Finish() //nolint:errcheck
-				}
-				return err
-			}
-
-			f, err := os.Create(out)
-			if err != nil {
-				return err
-			}
-			defer f.Close()
-
-			err = encryptToWriter(f, os.Stdin, passwords, config)
-			stopKDF()
-			if bar != nil {
-				bar.Finish()
-			}
+		if err := validateEncryptFlags(args, outputPath, outDir, inPlace); err != nil {
 			return err
 		}
 
-		info, err := os.Stat(source)
+		if len(args) == 1 && args[0] == "-" {
+			return encryptStdin(passwords, config)
+		}
+
+		if len(args) == 1 {
+			info, err := os.Stat(args[0])
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				if len(passwords) > 1 {
+					return errors.New("multi-recipient encryption not supported for directories")
+				}
+				dest := outputPath
+				if dest == "" {
+					dest = args[0] + ".cipherlock"
+				}
+				return cipherlock.EncryptDir(args[0], dest, passwords[0], config)
+			}
+		}
+
+		for _, src := range args {
+			info, err := os.Stat(src)
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				return fmt.Errorf("cannot mix files and directories: %s", src)
+			}
+
+			dest := outputPath
+			if inPlace {
+				dest = src
+			} else if dest == "" {
+				if outDir != "" {
+					dest = filepath.Join(outDir, filepath.Base(src)+".encrypted")
+				} else {
+					dest = src + ".encrypted"
+				}
+			}
+
+			if err := encryptFile(src, dest, info, passwords, config); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	},
+}
+
+func validateEncryptFlags(args []string, output, outDir string, inPlace bool) error {
+	if outDir != "" && output != "" {
+		return fmt.Errorf("--output and --out-dir are mutually exclusive")
+	}
+	if inPlace && (output != "" || outDir != "") {
+		return fmt.Errorf("--in-place is mutually exclusive with --output and --out-dir")
+	}
+	if output != "" && len(args) > 1 {
+		return fmt.Errorf("--output cannot be used with multiple input files")
+	}
+	return nil
+}
+
+func encryptStdin(passwords [][]byte, config *cipherlock.Config) error {
+	out := outputPath
+	stopKDF := showKDF()
+
+	if out == "" {
+		err := encryptToWriter(os.Stdout, os.Stdin, passwords, config)
+		stopKDF()
+		return err
+	}
+
+	f, err := os.Create(out)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	err = encryptToWriter(f, os.Stdin, passwords, config)
+	stopKDF()
+	return err
+}
+
+func encryptFile(srcPath, dstPath string, info os.FileInfo, passwords [][]byte, config *cipherlock.Config) error {
+	if info == nil {
+		var err error
+		info, err = os.Stat(srcPath)
 		if err != nil {
 			return err
 		}
+	}
 
-		if info.IsDir() {
-			if len(passwords) > 1 {
-				return errors.New("multi-recipient encryption not supported for directories")
-			}
-			if !destIsSet {
-				out = source + ".cipherlock"
-			}
-			return cipherlock.EncryptDir(source, out, passwords[0], config)
-		}
+	config.FileMeta = &cipherlock.FileMeta{
+		Name:    info.Name(),
+		Size:    info.Size(),
+		ModTime: info.ModTime(),
+	}
 
-		if !destIsSet {
-			out = source + ".encrypted"
-		}
+	srcFile, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
 
-		srcFile, err := os.Open(source)
-		if err != nil {
-			return err
-		}
-
-		if inPlace {
-			srcReader := progressReader(srcFile, info.Size(), "encrypting")
-			stopKDF := showKDF()
-
-			tmp := source + ".tmp"
-			destFile, err := os.Create(tmp)
-			if err != nil {
-				return err
-			}
-
-			err = encryptToWriter(destFile, srcReader, passwords, config)
-			destFile.Close()
-			stopKDF()
-			if err != nil {
-				srcFile.Close()
-				os.Remove(tmp)
-				return err
-			}
-
-			srcFile.Close()
-			if err := cipherlock.Shred(source); err != nil {
-				os.Remove(tmp)
-				return err
-			}
-			return os.Rename(tmp, source)
-		}
-
-		defer srcFile.Close()
-
+	if inPlace {
 		srcReader := progressReader(srcFile, info.Size(), "encrypting")
 		stopKDF := showKDF()
 
-		destFile, err := os.Create(out)
+		tmp := srcPath + ".tmp"
+		destFile, err := os.Create(tmp)
 		if err != nil {
+			srcFile.Close()
 			return err
 		}
-		defer destFile.Close()
 
 		err = encryptToWriter(destFile, srcReader, passwords, config)
+		destFile.Close()
 		stopKDF()
+		if err != nil {
+			srcFile.Close()
+			os.Remove(tmp)
+			return err
+		}
+
+		srcFile.Close()
+		if err := cipherlock.Shred(srcPath); err != nil {
+			os.Remove(tmp)
+			return err
+		}
+		return os.Rename(tmp, srcPath)
+	}
+
+	defer srcFile.Close()
+
+	srcReader := progressReader(srcFile, info.Size(), "encrypting")
+	stopKDF := showKDF()
+
+	destFile, err := os.Create(dstPath)
+	if err != nil {
 		return err
-	},
+	}
+	defer destFile.Close()
+
+	err = encryptToWriter(destFile, srcReader, passwords, config)
+	stopKDF()
+	return err
 }
 
 func encryptToWriter(w io.Writer, r io.Reader, passwords [][]byte, config *cipherlock.Config) error {
@@ -250,14 +281,15 @@ func encryptToWriter(w io.Writer, r io.Reader, passwords [][]byte, config *ciphe
 		}
 	} else {
 		encryptFn = func(dst io.Writer, src io.Reader, pwds [][]byte, cfg *cipherlock.Config) error {
+			if cfg != nil && cfg.FileMeta != nil {
+				return cipherlock.EncryptStreamV2(dst, src, pwds[0], cfg)
+			}
 			return cipherlock.EncryptStream(dst, src, pwds[0], cfg)
 		}
 	}
 	if !armorMode {
 		return encryptFn(w, r, passwords, config)
 	}
-	// Stream ciphertext through the armor writer so very large files
-	// don't have to fit in memory twice (encrypted + armored).
 	aw := cipherlock.NewArmorWriter(w)
 	defer aw.Close() //nolint:errcheck
 	return encryptFn(aw, r, passwords, config)
@@ -272,6 +304,7 @@ func init() {
 	encryptCmd.Flags().BoolVar(&checksumFlag, "checksum", false, "embed SHA-256 checksum of plaintext and verify on decrypt")
 	encryptCmd.Flags().StringArrayVar(&recipientPwds, "recipient", nil, "additional recipient password (can be specified multiple times)")
 	encryptCmd.Flags().StringVar(&profileName, "profile", "", "use a saved configuration profile")
+	encryptCmd.Flags().StringVar(&outDir, "out-dir", "", "output directory for batch encryption")
 }
 
 func generatePassword(length int) ([]byte, error) {
