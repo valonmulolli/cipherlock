@@ -15,6 +15,9 @@ func FuzzUnarmor(f *testing.F) {
 	f.Add([]byte("-----BEGIN CIPHERLOCK-----\n-----END CIPHERLOCK-----"))
 	f.Add([]byte("-----BEGIN CIPHERLOCK-----\n!!!not-base64\n-----END CIPHERLOCK-----"))
 	f.Add(bytes.Repeat([]byte{0xff}, 4096))
+	f.Add([]byte("-----BEGIN CIPHERLOCK-----\n\n\n-----END CIPHERLOCK-----"))
+	f.Add([]byte("-----BEGIN CIPHERLOCK-----\n\nYQ==\n\n-----END CIPHERLOCK-----"))
+	f.Add(bytes.Repeat([]byte("-----BEGIN CIPHERLOCK-----\n"), 100))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		defer func() {
@@ -33,6 +36,8 @@ func FuzzV2Header(f *testing.F) {
 	f.Add([]byte{'C', 'V', '2', 0, 0x03, 0x01, 0x10, 0x00})
 	f.Add([]byte{'C', 'V', '2', 0, 0x02, 0x10, 0x00})
 	f.Add(bytes.Repeat([]byte{0x55}, 256))
+	f.Add([]byte{'C', 'V', '2', 0, 0x03, 0xff, 0xff, 0xff})
+	f.Add([]byte{'C', 'V', '2', 0, 0x02, 0xff, 0xff})
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		defer func() {
@@ -49,6 +54,9 @@ func FuzzV2Header(f *testing.F) {
 func FuzzV04Header(f *testing.F) {
 	f.Add([]byte{'C', 'V', '2', 0, 0x04, 0x00, 0x01, 0, 0, 0, 0})
 	f.Add(bytes.Repeat([]byte{0xaa}, 512))
+	f.Add([]byte{'C', 'V', '2', 0, 0x04, 0x00, 0x11, 0, 0, 0, 0})
+	f.Add([]byte{'C', 'V', '2', 0, 0x04, 0xff, 0x10, 0, 0, 0, 0})
+	f.Add(bytes.Repeat([]byte{0xaa}, 2048))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		defer func() {
@@ -64,6 +72,8 @@ func FuzzV04Header(f *testing.F) {
 func FuzzV05Stream(f *testing.F) {
 	f.Add([]byte{'C', 'V', '2', 0, 0x05, 0x00, 0x10, 0x00})
 	f.Add(bytes.Repeat([]byte{0x33}, 256))
+	f.Add([]byte{'C', 'V', '2', 0, 0x05, 0x00, 0x10, 0x00, 0x04, 0x00})
+	f.Add([]byte{'C', 'V', '2', 0, 0x05, 0x01, 0x10, 0x00})
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		defer func() {
@@ -80,6 +90,9 @@ func FuzzV05Stream(f *testing.F) {
 func FuzzV06Stream(f *testing.F) {
 	f.Add([]byte{'C', 'V', '2', 0, 0x06, 0x00, 0x10, 0x00})
 	f.Add(bytes.Repeat([]byte{0x77}, 256))
+	f.Add([]byte{'C', 'V', '2', 0, 0x06, 0x02, 0x10, 0x00})
+	f.Add([]byte{'C', 'V', '2', 0, 0x06, 0x00, 0xff, 0xff})
+	f.Add([]byte{'C', 'V', '2', 0, 0x06, 0x00, 0x10, 0x00, 0x00, 0x00})
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		defer func() {
@@ -97,6 +110,9 @@ func FuzzV06Stream(f *testing.F) {
 func FuzzV07Stream(f *testing.F) {
 	f.Add([]byte{'C', 'V', '2', 0, 0x07, 0x00, 0x01, 0, 0, 0, 0})
 	f.Add(bytes.Repeat([]byte{0xcc}, 512))
+	f.Add([]byte{'C', 'V', '2', 0, 0x07, 0x00, 0x11, 0, 0, 0, 0})
+	f.Add([]byte{'C', 'V', '2', 0, 0x07, 0xff, 0x01, 0, 0, 0, 0})
+	f.Add(bytes.Repeat([]byte{0xcc}, 2048))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		defer func() {
@@ -111,11 +127,37 @@ func FuzzV07Stream(f *testing.F) {
 // FuzzDecrypt dispatches random bytes to the top-level Decrypt entry point.
 // This is the function users call with arbitrary input. It must return a
 // sentinel error, never panic, and never allocate more than a few MB.
+// FuzzNewUnarmorReader feeds random data to NewUnarmorReader and reads
+// from the returned reader to ensure no panic on hostile input.
+func FuzzNewUnarmorReader(f *testing.F) {
+	f.Add([]byte(""))
+	f.Add([]byte("-----BEGIN CIPHERLOCK-----\n-----END CIPHERLOCK-----"))
+	f.Add(bytes.Repeat([]byte{0x00}, 512))
+	f.Add([]byte("plain text with no armor header"))
+	f.Add([]byte("-----BEGIN CIPHERLOCK-----\n\n\n-----END CIPHERLOCK-----"))
+	f.Add(bytes.Repeat([]byte("-----BEGIN CIPHERLOCK-----\n"), 50))
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("NewUnarmorReader panicked: %v\ninput=%q", r, data)
+			}
+		}()
+		r, err := NewUnarmorReader(bytes.NewReader(data))
+		if err != nil {
+			return
+		}
+		_, _ = io.ReadAll(r)
+	})
+}
+
 func FuzzDecrypt(f *testing.F) {
 	f.Add([]byte("not a cipherlock file"))
 	f.Add([]byte{'C', 'V', '2', 0, 0x05})
 	f.Add([]byte{'C', 'V', '2', 0, 0x07})
 	f.Add(bytes.Repeat([]byte{0x00}, 1024))
+	f.Add([]byte{'C', 'V', '2', 0, 0x06})
+	f.Add([]byte{'C', 'V', '2', 0, 0x04})
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		defer func() {
