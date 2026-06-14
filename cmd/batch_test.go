@@ -206,3 +206,39 @@ func TestIsAuthError(t *testing.T) {
 		t.Fatal("isAuthError(nil) should be false")
 	}
 }
+
+func TestCheckDecrypt(t *testing.T) {
+	dir := t.TempDir()
+	plaintext := []byte("check me")
+	srcPath := filepath.Join(dir, "test.encrypted")
+
+	cfg := &cipherlock.Config{
+		SaltLen: 16,
+		Time:    1,
+		Memory:  65536,
+		Threads: 1,
+		KeyLen:  32,
+	}
+
+	var buf bytes.Buffer
+	if err := cipherlock.EncryptStream(&buf, bytes.NewReader(plaintext), testPassword, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(srcPath, buf.Bytes(), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Stat(srcPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := checkDecrypt(srcPath, info, testPassword); err != nil {
+		t.Fatalf("checkDecrypt with correct password: %v", err)
+	}
+
+	if err := checkDecrypt(srcPath, info, []byte("wrong")); err == nil {
+		t.Fatal("expected error for wrong password")
+	}
+}

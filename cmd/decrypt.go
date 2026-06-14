@@ -18,6 +18,8 @@ var (
 	decryptOutput  string
 	decryptKeyFile string
 	decryptOutDir  string
+	checkOnly      bool
+	forceOverwrite bool
 )
 
 var decryptCmd = &cobra.Command{
@@ -76,6 +78,12 @@ plaintext to stdout.`,
 		}
 
 		if len(args) == 1 && args[0] == "-" {
+			if checkOnly {
+				stopKDF := showKDF()
+				err := decryptFromReader(io.Discard, os.Stdin, password)
+				stopKDF()
+				return err
+			}
 			return decryptStdin(password)
 		}
 
@@ -86,6 +94,13 @@ plaintext to stdout.`,
 				return err
 			}
 
+			if checkOnly {
+				if err := checkDecrypt(src, info, password); err != nil {
+					return err
+				}
+				continue
+			}
+
 			dest := decryptOutput
 			if inPlace {
 				dest = src
@@ -94,6 +109,12 @@ plaintext to stdout.`,
 					dest = filepath.Join(decryptOutDir, filepath.Base(defaultDecryptPath(src)))
 				} else {
 					dest = defaultDecryptPath(src)
+				}
+			}
+
+			if !forceOverwrite && !inPlace {
+				if _, err := os.Stat(dest); err == nil {
+					return fmt.Errorf("output %q exists; use --force to overwrite", dest)
 				}
 			}
 
@@ -109,6 +130,26 @@ plaintext to stdout.`,
 
 		return nil
 	},
+}
+
+func checkDecrypt(srcPath string, info os.FileInfo, password []byte) error {
+	srcFile, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	var reader io.Reader
+	if info.Size() > 0 && info.Mode().IsRegular() {
+		reader = progressReader(srcFile, info.Size(), "checking")
+	} else {
+		reader = srcFile
+	}
+
+	stopKDF := showKDF()
+	err = decryptFromReader(io.Discard, reader, password)
+	stopKDF()
+	return err
 }
 
 func decryptStdin(password []byte) error {
@@ -280,4 +321,6 @@ func init() {
 	decryptCmd.Flags().StringVar(&decryptOutDir, "out-dir", "", "output directory for batch decryption")
 	decryptCmd.Flags().BoolVar(&keychainFlag, "keychain", false, "read password from system keychain")
 	decryptCmd.Flags().BoolVar(&saveKeychain, "save-keychain", false, "save password to system keychain after decryption")
+	decryptCmd.Flags().BoolVar(&checkOnly, "check", false, "verify password and format without writing output")
+	decryptCmd.Flags().BoolVar(&forceOverwrite, "force", false, "overwrite existing output files without prompting")
 }
