@@ -4,13 +4,30 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/schollz/progressbar/v3"
 )
 
 func showKDF() func() {
-	fmt.Fprint(os.Stderr, "Deriving key... ")
-	return func() {}
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(200 * time.Millisecond)
+		defer ticker.Stop()
+		fmt.Fprint(os.Stderr, "Deriving key")
+		for {
+			select {
+			case <-ticker.C:
+				fmt.Fprint(os.Stderr, ".")
+			case <-done:
+				return
+			}
+		}
+	}()
+	return func() {
+		close(done)
+		fmt.Fprintln(os.Stderr)
+	}
 }
 
 func progressReader(r io.Reader, size int64, label string) io.Reader {
