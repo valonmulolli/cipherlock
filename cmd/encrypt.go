@@ -90,8 +90,12 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			passwords = [][]byte{pwd}
 		}
 
-		if armorMode && len(recipientPwds) == 0 && len(passwords[0]) == 0 {
-			return errors.New("password cannot be empty in armor mode")
+		if armorMode {
+			for _, p := range passwords {
+				if len(p) == 0 {
+					return errors.New("password cannot be empty in armor mode")
+				}
+			}
 		}
 
 		config := &cipherlock.Config{
@@ -194,10 +198,10 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			return err
 		}
 
-		srcReader := progressReader(srcFile, info.Size(), "encrypting")
-		stopKDF := showKDF()
-
 		if inPlace {
+			srcReader := progressReader(srcFile, info.Size(), "encrypting")
+			stopKDF := showKDF()
+
 			tmp := source + ".tmp"
 			destFile, err := os.Create(tmp)
 			if err != nil {
@@ -205,20 +209,26 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			}
 
 			err = encryptToWriter(destFile, srcReader, passwords, config)
-			srcFile.Close()
 			destFile.Close()
 			stopKDF()
 			if err != nil {
+				srcFile.Close()
 				os.Remove(tmp)
 				return err
 			}
 
+			srcFile.Close()
 			if err := cipherlock.Shred(source); err != nil {
 				os.Remove(tmp)
 				return err
 			}
 			return os.Rename(tmp, source)
 		}
+
+		defer srcFile.Close()
+
+		srcReader := progressReader(srcFile, info.Size(), "encrypting")
+		stopKDF := showKDF()
 
 		destFile, err := os.Create(out)
 		if err != nil {

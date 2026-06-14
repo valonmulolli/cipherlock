@@ -9,6 +9,67 @@ import (
 	"path/filepath"
 )
 
+const rekeyBufThreshold = 64 * 1024
+
+// safeWriter buffers writes up to rekeyBufThreshold bytes before flushing
+// to dst. On Commit(), buffered data is flushed to dst. On Discard(),
+// buffered data is dropped.
+//
+// This prevents partial output on error: if the decrypt goroutine fails
+// (wrong password, corrupt header) before the encrypt goroutine finishes
+// writing its header, the header is discarded and dst is untouched. Once
+// the buffer threshold is exceeded (i.e., the decrypt has produced enough
+// data that the encrypt is well past the header), writes pass through
+// directly and Discard no longer prevents data from reaching dst.
+type safeWriter struct {
+	dst       io.Writer
+	buf       bytes.Buffer
+	threshold int
+	direct    bool
+}
+
+func newSafeWriter(dst io.Writer) *safeWriter {
+	return &safeWriter{dst: dst, threshold: rekeyBufThreshold}
+}
+
+func (sw *safeWriter) Write(p []byte) (int, error) {
+	if sw.direct {
+		return sw.dst.Write(p)
+	}
+	if sw.buf.Len() >= sw.threshold {
+		if _, err := sw.buf.WriteTo(sw.dst); err != nil {
+			return 0, err
+		}
+		sw.direct = true
+		return sw.dst.Write(p)
+	}
+	n, err := sw.buf.Write(p)
+	if err != nil {
+		return n, err
+	}
+	if sw.buf.Len() >= sw.threshold {
+		if _, err := sw.buf.WriteTo(sw.dst); err != nil {
+			return n, err
+		}
+		sw.direct = true
+	}
+	return len(p), nil
+}
+
+func (sw *safeWriter) Commit() error {
+	if sw.direct {
+		return nil
+	}
+	_, err := sw.buf.WriteTo(sw.dst)
+	sw.direct = true
+	return err
+}
+
+func (sw *safeWriter) Discard() {
+	sw.buf.Reset()
+	sw.direct = true
+}
+
 // ReKey decrypts data from src with oldPassword and re-encrypts it with
 // newPassword. The output format mirrors the input format:
 //   - v0x05 in -> v0x05 out
@@ -58,6 +119,7 @@ func ReKey(dst io.Writer, src io.Reader, oldPassword, newPassword []byte, config
 
 		pipeR, pipeW := io.Pipe()
 		errCh := make(chan error, 2)
+		sw := newSafeWriter(dst)
 
 		go func() {
 			var err error
@@ -87,11 +149,11 @@ func ReKey(dst io.Writer, src io.Reader, oldPassword, newPassword []byte, config
 			var err error
 			switch version {
 			case formatVersionStream:
-				err = EncryptStream(dst, pipeR, newPassword, &local)
+				err = EncryptStream(sw, pipeR, newPassword, &local)
 			case formatVersionStreamV2:
-				err = EncryptStreamV2(dst, pipeR, newPassword, &local)
+				err = EncryptStreamV2(sw, pipeR, newPassword, &local)
 			case formatVersionStreamMulti:
-				err = EncryptStreamMulti(dst, pipeR, [][]byte{newPassword}, &local)
+				err = EncryptStreamMulti(sw, pipeR, [][]byte{newPassword}, &local)
 			}
 			errCh <- err
 		}()
@@ -99,9 +161,14 @@ func ReKey(dst io.Writer, src io.Reader, oldPassword, newPassword []byte, config
 		err1 := <-errCh
 		err2 := <-errCh
 		if err1 != nil && !errors.Is(err1, io.ErrClosedPipe) {
+			sw.Discard()
 			return err1
 		}
-		return err2
+		if err2 != nil {
+			sw.Discard()
+			return err2
+		}
+		return sw.Commit()
 	}
 
 	var buf bytes.Buffer

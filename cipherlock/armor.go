@@ -157,6 +157,11 @@ func (lw *lineWriter) Flush() error {
 // to flush the base64 encoder, emit the final partial line, and write the
 // footer; callers should defer Close.
 //
+// The armor header is written on the first Write call (not on Close), so a
+// partial output that never receives Close will have a header but no footer.
+// Callers MUST call Close after checking the encrypt error to ensure the
+// armor footer is present.
+//
 // The returned writer is not safe for concurrent use.
 func NewArmorWriter(w io.Writer) io.WriteCloser {
 	lw := &lineWriter{w: w, buf: make([]byte, 0, armorLineLen*2)}
@@ -265,40 +270,42 @@ type unarmorReader struct {
 }
 
 func (u *unarmorReader) Read(p []byte) (int, error) {
-	if u.footer {
-		return 0, io.EOF
-	}
-	// Drain any pending decoded bytes first.
-	if u.decodedPos < len(u.decodedBuf) {
-		n := copy(p, u.decodedBuf[u.decodedPos:])
-		u.decodedPos += n
-		return n, nil
-	}
+	for {
+		if u.footer {
+			return 0, io.EOF
+		}
+		// Drain any pending decoded bytes first.
+		if u.decodedPos < len(u.decodedBuf) {
+			n := copy(p, u.decodedBuf[u.decodedPos:])
+			u.decodedPos += n
+			return n, nil
+		}
 
-	// Read the next line. If the line is the footer, we're done.
-	line, err := u.br.ReadString('\n')
-	if err != nil && err != io.EOF {
-		return 0, err
+		// Read the next line. If the line is the footer, we're done.
+		line, err := u.br.ReadString('\n')
+		if err != nil && err != io.EOF {
+			return 0, err
+		}
+		if err == io.EOF && len(line) == 0 {
+			u.footer = true
+			return 0, io.ErrUnexpectedEOF
+		}
+		trimmed := strings.TrimRight(line, "\r\n\t ")
+		if trimmed == armorFooter {
+			u.footer = true
+			return 0, io.EOF
+		}
+		if trimmed == "" {
+			// Blank line: skip and continue the loop.
+			continue
+		}
+		decoded := make([]byte, base64.StdEncoding.DecodedLen(len(trimmed)))
+		n, decErr := base64.StdEncoding.Decode(decoded, []byte(trimmed))
+		if decErr != nil {
+			return 0, fmt.Errorf("cipherlock: base64 decode: %w", decErr)
+		}
+		u.decodedBuf = decoded[:n]
+		u.decodedPos = 0
+		continue
 	}
-	if err == io.EOF && len(line) == 0 {
-		u.footer = true
-		return 0, io.ErrUnexpectedEOF
-	}
-	trimmed := strings.TrimRight(line, "\r\n\t ")
-	if trimmed == armorFooter {
-		u.footer = true
-		return 0, io.EOF
-	}
-	if trimmed == "" {
-		// Blank line: skip and recurse.
-		return u.Read(p)
-	}
-	decoded := make([]byte, base64.StdEncoding.DecodedLen(len(trimmed)))
-	n, decErr := base64.StdEncoding.Decode(decoded, []byte(trimmed))
-	if decErr != nil {
-		return 0, fmt.Errorf("cipherlock: base64 decode: %w", decErr)
-	}
-	u.decodedBuf = decoded[:n]
-	u.decodedPos = 0
-	return u.Read(p)
 }
