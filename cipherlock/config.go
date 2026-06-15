@@ -1,6 +1,9 @@
 package cipherlock
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // DefaultChunkSize is the default chunk size (64 KB) used for stream encryption.
 const DefaultChunkSize = 64 * 1024
@@ -62,4 +65,32 @@ var DefaultConfig = &Config{
 	Threads:   4,
 	KeyLen:    32,
 	ChunkSize: DefaultChunkSize,
+}
+
+// Validate checks that all Config fields are within valid bounds.
+// Returns nil if the configuration is valid, or ErrConfigInvalid
+// wrapping a descriptive message if not.
+func (c *Config) Validate() error {
+	if c == nil {
+		return nil
+	}
+	if c.SaltLen < 8 || c.SaltLen > maxSaltLen {
+		return fmt.Errorf("%w: SaltLen must be between 8 and %d, got %d", ErrConfigInvalid, maxSaltLen, c.SaltLen)
+	}
+	if c.KeyLen < 16 || c.KeyLen > maxKeyLen {
+		return fmt.Errorf("%w: KeyLen must be between 16 and %d, got %d", ErrConfigInvalid, maxKeyLen, c.KeyLen)
+	}
+	if c.Time < 1 || c.Time > maxTime {
+		return fmt.Errorf("%w: Time must be between 1 and %d, got %d", ErrConfigInvalid, maxTime, c.Time)
+	}
+	if c.Memory < 1 || c.Memory > maxMemory {
+		return fmt.Errorf("%w: Memory must be between 1 and %d, got %d", ErrConfigInvalid, maxMemory, c.Memory)
+	}
+	if c.Threads < 1 || c.Threads > maxThreads {
+		return fmt.Errorf("%w: Threads must be between 1 and %d, got %d", ErrConfigInvalid, maxThreads, c.Threads)
+	}
+	if c.ChunkSize < 1 || c.ChunkSize > maxChunkSize {
+		return fmt.Errorf("%w: ChunkSize must be between 1 and %d, got %d", ErrConfigInvalid, maxChunkSize, c.ChunkSize)
+	}
+	return nil
 }

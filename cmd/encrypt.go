@@ -99,7 +99,11 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			if err != nil {
 				return err
 			}
-			fmt.Fprintln(os.Stderr, "password:", string(pwd))
+			if quiet {
+				fmt.Fprintln(os.Stderr, string(pwd))
+			} else {
+				fmt.Fprintln(os.Stderr, "password:", string(pwd))
+			}
 			passwords = [][]byte{pwd}
 		} else {
 			var pwd []byte
@@ -340,6 +344,9 @@ func init() {
 	encryptCmd.Flags().BoolVar(&keychainFlag, "keychain", false, "read password from system keychain")
 	encryptCmd.Flags().BoolVar(&saveKeychain, "save-keychain", false, "save password to system keychain after encryption")
 	encryptCmd.Flags().BoolVar(&forceEncrypt, "force", false, "overwrite existing output files without prompting")
+	encryptCmd.RegisterFlagCompletionFunc("profile", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+		return profileNames(), cobra.ShellCompDirectiveDefault
+	})
 }
 
 func generatePassword(length int) ([]byte, error) {

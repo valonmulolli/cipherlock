@@ -188,6 +188,18 @@ func lookupProfile(name string) (*cipherlock.Profile, error) {
 	return &p, nil
 }
 
+func profileNames() []string {
+	store, err := loadProfileStore()
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(store.Profiles))
+	for name := range store.Profiles {
+		names = append(names, name)
+	}
+	return names
+}
+
 func init() {
 	rootCmd.AddCommand(configCmd)
 	configCmd.AddCommand(setProfileCmd)

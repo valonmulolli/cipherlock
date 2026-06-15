@@ -134,6 +134,9 @@ func estimateStrength(pwd []byte) strength {
 }
 
 func showStrength(pwd []byte) {
+	if quiet {
+		return
+	}
 	s := estimateStrength(pwd)
 	fmt.Fprintf(os.Stderr, "Password strength: %s\n", s)
 }

@@ -6,7 +6,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var inPlace bool
+var (
+	inPlace bool
+	quiet   bool
+)
 
 // Version is set at build time via -ldflags.
 // Example: go build -ldflags "-X github.com/valonmulolli/cipherlock/cmd.Version=v1.2.0" .
@@ -44,5 +47,6 @@ func Execute() error {
 
 func init() {
 	rootCmd.PersistentFlags().BoolVar(&inPlace, "in-place", false, "overwrite the source file instead of creating a new one")
+	rootCmd.PersistentFlags().BoolVar(&quiet, "quiet", false, "suppress progress output")
 	rootCmd.AddCommand(versionCmd)
 }

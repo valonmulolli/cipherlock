@@ -478,9 +478,8 @@ func readStreamV05Meta(src io.Reader) (*FileMeta, error) {
 // v0x07) and returns the FileMeta attached at encrypt time. The plaintext is
 // streamed to dst. The returned *FileMeta is nil if the source had no metadata.
 //
-// This is the format-aware counterpart to DecryptWithMeta: it dispatches on
-// the version byte the same way, but is named after the legacy v0x05 helper
-// it replaced. New code should prefer DecryptWithMeta.
+// Deprecated: DecryptStreamMeta is identical to DecryptWithMeta. Prefer
+// DecryptWithMeta.
 //
 // It returns ErrInvalidFormat, ErrVersionMismatch, ErrAuthFailed, or
 // ErrChecksumMismatch on failure.

@@ -10,6 +10,9 @@ import (
 )
 
 func showKDF() func() {
+	if quiet {
+		return func() {}
+	}
 	done := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(200 * time.Millisecond)
@@ -31,6 +34,9 @@ func showKDF() func() {
 }
 
 func progressReader(r io.Reader, size int64, label string) io.Reader {
+	if quiet || size == 0 {
+		return r
+	}
 	bar := progressbar.NewOptions64(
 		size,
 		progressbar.OptionSetDescription(label),

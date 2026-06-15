@@ -38,6 +38,9 @@ var ErrEncryptedMeta = errors.New("cipherlock: file metadata is encrypted; passw
 // metadata is required.
 var ErrV05MetaUnsupported = errors.New("cipherlock: EncryptStream (v0x05) cannot attach FileMeta; use EncryptStreamV2")
 
+// ErrConfigInvalid is returned when Config.Validate() detects invalid parameters.
+var ErrConfigInvalid = errors.New("cipherlock: invalid configuration")
+
 const (
 	formatVersionV2          byte = 0x02
 	formatVersionV3          byte = 0x03

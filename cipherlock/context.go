@@ -229,3 +229,60 @@ func DecryptStreamMultiContext(ctx context.Context, dst io.Writer, src io.Reader
 		return err
 	}
 }
+
+// ReKeyContext is a context-aware wrapper around ReKey.
+// It cancels streaming re-key if the context is done before completion.
+//
+// NOTE: Context cancellation does not interrupt an in-progress Argon2id key
+// derivation. The spawned goroutine runs the KDF to completion even after
+// ctx is cancelled.
+func ReKeyContext(ctx context.Context, dst io.Writer, src io.Reader, oldPassword, newPassword []byte, config *Config) error {
+	done := make(chan error, 1)
+	go func() {
+		done <- ReKey(dst, withCancel(ctx, src), oldPassword, newPassword, config)
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-done:
+		return err
+	}
+}
+
+// EncryptDirContext is a context-aware wrapper around EncryptDir.
+// It cancels directory encryption if the context is done before completion.
+//
+// NOTE: Context cancellation does not interrupt an in-progress Argon2id key
+// derivation. The spawned goroutine runs the KDF to completion even after
+// ctx is cancelled.
+func EncryptDirContext(ctx context.Context, source, dest string, password []byte, config *Config) error {
+	done := make(chan error, 1)
+	go func() {
+		done <- EncryptDir(source, dest, password, config)
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-done:
+		return err
+	}
+}
+
+// DecryptDirContext is a context-aware wrapper around DecryptDir.
+// It cancels directory decryption if the context is done before completion.
+//
+// NOTE: Context cancellation does not interrupt an in-progress Argon2id key
+// derivation. The spawned goroutine runs the KDF to completion even after
+// ctx is cancelled.
+func DecryptDirContext(ctx context.Context, source, dest string, password []byte) error {
+	done := make(chan error, 1)
+	go func() {
+		done <- DecryptDir(source, dest, password)
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-done:
+		return err
+	}
+}

@@ -15,6 +15,8 @@ import (
 // It is a convenience wrapper around EncryptStream and always produces the streaming
 // format (v0x05). The config parameter controls Argon2 parameters and whether to
 // include a checksum. Returns ErrAuthFailed if authentication fails.
+//
+// Deprecated: Encrypt is identical to EncryptStream. Prefer EncryptStream for clarity.
 func Encrypt(dst io.Writer, src io.Reader, password []byte, config *Config) error {
 	return EncryptStream(dst, src, password, config)
 }
