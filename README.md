@@ -490,7 +490,7 @@ cipherlock uses a self-describing binary format with versioned headers:
     [32 bytes  SHA-256 checksum (when flags bit 0 set)]
     Variable   Ciphertext + GCM authentication tag (last 16 bytes)
 
-The ciphertext is encrypted with a random file key, which is then encrypted once per recipient. Each recipient independently derives their own key with Argon2id to decrypt the file key.
+The ciphertext is encrypted with a random file key, which is then encrypted once per recipient. Each recipient independently derives their own key with Argon2id to decrypt the file key. The entire plaintext is buffered in memory before encryption — use V7 instead for large files.
 
 ### V5 (streaming)
 
