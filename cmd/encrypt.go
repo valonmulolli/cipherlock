@@ -26,6 +26,7 @@ var (
 	outDir        string
 	keychainFlag  bool
 	saveKeychain  bool
+	forceEncrypt  bool
 )
 
 var encryptCmd = &cobra.Command{
@@ -156,6 +157,11 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 				if dest == "" {
 					dest = args[0] + ".cipherlock"
 				}
+				if !forceEncrypt {
+					if _, err := os.Stat(dest); err == nil {
+						return fmt.Errorf("output %q exists; use --force to overwrite", dest)
+					}
+				}
 				return cipherlock.EncryptDir(args[0], dest, passwords[0], config)
 			}
 		}
@@ -178,6 +184,12 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 					dest = filepath.Join(outDir, filepath.Base(src)+".encrypted")
 				} else {
 					dest = src + ".encrypted"
+				}
+			}
+
+			if !forceEncrypt && !inPlace {
+				if _, err := os.Stat(dest); err == nil {
+					return fmt.Errorf("output %q exists; use --force to overwrite", dest)
 				}
 			}
 
@@ -327,6 +339,7 @@ func init() {
 	encryptCmd.Flags().StringVar(&outDir, "out-dir", "", "output directory for batch encryption")
 	encryptCmd.Flags().BoolVar(&keychainFlag, "keychain", false, "read password from system keychain")
 	encryptCmd.Flags().BoolVar(&saveKeychain, "save-keychain", false, "save password to system keychain after encryption")
+	encryptCmd.Flags().BoolVar(&forceEncrypt, "force", false, "overwrite existing output files without prompting")
 }
 
 func generatePassword(length int) ([]byte, error) {

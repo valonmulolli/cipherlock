@@ -20,6 +20,7 @@ var (
 	decryptOutDir  string
 	checkOnly      bool
 	forceOverwrite bool
+	decryptDirMode bool
 )
 
 var decryptCmd = &cobra.Command{
@@ -101,6 +102,10 @@ plaintext to stdout.`,
 				continue
 			}
 
+			if decryptDirMode {
+				return decryptDirSource(src, info, password)
+			}
+
 			dest := decryptOutput
 			if inPlace {
 				dest = src
@@ -176,6 +181,42 @@ func decryptStdin(password []byte) error {
 	if err != nil {
 		return err
 	}
+	return nil
+}
+
+func decryptDirSource(srcPath string, info os.FileInfo, password []byte) error {
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("not a regular file: %s", srcPath)
+	}
+
+	dest := decryptOutput
+	if inPlace {
+		dest = srcPath
+	} else if dest == "" {
+		if decryptOutDir != "" {
+			dest = filepath.Join(decryptOutDir, filepath.Base(defaultDecryptPath(srcPath)))
+		} else {
+			dest = defaultDecryptPath(srcPath)
+		}
+	}
+
+	if !forceOverwrite && !inPlace {
+		if _, err := os.Stat(dest); err == nil {
+			return fmt.Errorf("output %q exists; use --force to overwrite", dest)
+		}
+	}
+
+	if err := cipherlock.DecryptDir(srcPath, dest, password); err != nil {
+		if isAuthError(err) {
+			return errors.New("decryption failed: wrong password or corrupted data")
+		}
+		return err
+	}
+
+	if inPlace {
+		_ = cipherlock.Shred(srcPath)
+	}
+
 	return nil
 }
 
@@ -323,4 +364,5 @@ func init() {
 	decryptCmd.Flags().BoolVar(&saveKeychain, "save-keychain", false, "save password to system keychain after decryption")
 	decryptCmd.Flags().BoolVar(&checkOnly, "check", false, "verify password and format without writing output")
 	decryptCmd.Flags().BoolVar(&forceOverwrite, "force", false, "overwrite existing output files without prompting")
+	decryptCmd.Flags().BoolVar(&decryptDirMode, "dir", false, "decrypt directory archive and extract")
 }

@@ -8,7 +8,7 @@ builds:
   - binary: cipherlock
     main: .
     ldflags:
-      - -s -w
+      - -s -w -X github.com/valonmulolli/cipherlock/cmd.Version={{.Version}}
     env:
       - CGO_ENABLED=0
     goos:
