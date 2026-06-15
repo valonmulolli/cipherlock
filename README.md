@@ -34,6 +34,10 @@ cipherlock is a Go library and CLI tool for encrypting files and directories usi
 - **Sentinel error types**: `ErrAuthFailed`, `ErrChecksumMismatch`, `ErrCorrupted` — programmatic error handling instead of string matching.
 - **Encrypted-metadata streaming (v0x06)**: Optional `FileMeta` is stored as an encrypted chunk so the original filename and size are not visible without the password.
 - **Streaming multi-recipient (v0x07)**: Multi-recipient encryption that streams the plaintext in fixed-size chunks. No upper file size limit, even with `--recipient` flags.
+- **X25519 asymmetric encryption (v0x08)**: Encrypt files to one or more X25519 public keys using ephemeral key exchange + HKDF + AES-256-GCM. Each recipient decrypts with their private identity key — no shared password needed.
+- **Identity key generation**: `generate-keypair` creates X25519 key pairs. Private keys can be passphrase-protected with Argon2id + AES-256-GCM.
+- **Password from env/fd**: `--password-env VAR` and `--password-fd N` let CI/CD pipelines supply passwords without interactive prompts or temporary files.
+- **Parallel batch processing**: `--jobs N` encrypts or decrypts multiple files concurrently using a worker pool.
 - **Defensive header bounds**: Salt, key length, chunk size, and recipient count are validated against strict upper limits to prevent OOM via maliciously crafted files.
 
 ## Usage
@@ -117,6 +121,51 @@ Change the password on an encrypted file without decrypting to disk:
 
 Prompts for the old and new passwords. Supports `--key-file`, `--new-key-file`, `--output`, and `--in-place` flags.
 
+### Generate X25519 key pair
+
+    cipherlock generate-keypair --output-dir ~/.cipherlock
+
+Creates `cipherlock.identity` (private key, armored) and `cipherlock.pub` (public key, base64). Protect the identity with a passphrase:
+
+    cipherlock generate-keypair --passphrase-file ~/.secrets/identity-pass.txt
+
+### Asymmetric encryption (X25519 public key)
+
+Encrypt a file so only the holder of the corresponding identity can decrypt:
+
+    cipherlock encrypt --recipient-pubkey alice.pub document.pdf
+
+Multiple recipients:
+
+    cipherlock encrypt --recipient-pubkey alice.pub --recipient-pubkey bob.pub document.pdf
+
+### Asymmetric decryption
+
+    cipherlock decrypt --identity ~/.cipherlock/cipherlock.identity document.pdf.encrypted
+
+If the identity is passphrase-protected, you'll be prompted for the passphrase automatically.
+
+### Password from environment variable
+
+    CIPHERLOCK_PASS="my-secret" cipherlock encrypt --password-env CIPHERLOCK_PASS document.pdf
+
+Useful in CI/CD pipelines where interactive prompts are unavailable.
+
+### Password from file descriptor
+
+    echo -n "my-secret" | cipherlock encrypt --password-fd 0 document.pdf
+
+File descriptor 0 is stdin. Also works for decrypt and rekey.
+
+### Parallel batch processing
+
+Encrypt or decrypt multiple files concurrently:
+
+    cipherlock encrypt --jobs 4 file1.txt file2.txt file3.txt file4.txt
+    cipherlock decrypt --jobs 4 file1.txt.encrypted file2.txt.encrypted
+
+Controls how many files are processed simultaneously. Defaults to sequential (1 job).
+
 ### Verify checksum
 
 Encrypt with an embedded SHA-256 checksum:
@@ -185,7 +234,7 @@ var buf bytes.Buffer
 err := cipherlock.Decrypt(&buf, someReader, password)
 ```
 
-`Decrypt` auto-detects all format versions (v0x02, v0x03, v0x04, v0x05) — no special flag needed.
+`Decrypt` auto-detects all format versions (v0x02–v0x08) — no special flag needed.
 
 ### Context-aware encryption (cancellable)
 
@@ -228,7 +277,7 @@ if errors.Is(err, cipherlock.ErrEncryptedMeta) {
 }
 ```
 
-Available sentinel errors: `ErrInvalidFormat`, `ErrVersionMismatch`, `ErrAuthFailed`, `ErrChecksumMismatch`, `ErrCorrupted`, `ErrAtLeastOnePassword`, `ErrEncryptedMeta`, `ErrNotArmored`.
+Available sentinel errors: `ErrInvalidFormat`, `ErrVersionMismatch`, `ErrAuthFailed`, `ErrChecksumMismatch`, `ErrCorrupted`, `ErrAtLeastOnePassword`, `ErrEncryptedMeta`, `ErrNotArmored`, `ErrUnsupportedIdentity`, `ErrIdentityNeedsPassphrase`.
 
 ### Read file metadata without decrypting
 
@@ -531,6 +580,35 @@ Identical to v0x05 except the optional metadata is encrypted under the same key 
 
 A fresh random file key encrypts the data (and optional metadata chunk). The file key is then sealed once per recipient using their derived key. This is the streaming replacement for the legacy v0x04 `EncryptMulti` and supports arbitrarily large files without buffering the plaintext. Use `EncryptStreamMulti` / `DecryptStreamMulti` from the library, or the `cipherlock` CLI which auto-selects this format when `--recipient` is given more than once.
 
+### V8 (asymmetric, X25519)
+
+     4 bytes    Magic: "CV2\0"
+     1 byte     Version: 0x08
+     1 byte     Flags: bit 0 = checksum present, bit 1 = has metadata
+     4 bytes    Number of X25519 recipients (little-endian)
+     For each recipient:
+       1 byte   Identity type (0x01 = X25519)
+       32 bytes Ephemeral X25519 public key
+       12 bytes Nonce for key sealing
+       48 bytes Sealed file key (AES-256-GCM, ciphertext + 16-byte tag)
+
+     [Optional encrypted metadata chunk, when flags bit 1 is set:]
+       12 bytes  Nonce
+       4 bytes   Ciphertext length
+       M bytes   Encrypted metadata (filename + size + modtime)
+
+     Zero or more data chunks: encrypted with the shared file key
+       12 bytes  Nonce
+       4 bytes   Ciphertext length (0 = end)
+       N bytes   Ciphertext + 16-byte GCM tag
+
+     End of stream: 4 zero bytes
+     [Optional 32-byte SHA-256 checksum trailer, when flags bit 0 is set]
+
+A random 32-byte file key encrypts the data. For each recipient, an ephemeral X25519 key pair is generated, ECDH produces a shared secret, HKDF-SHA256 derives a wrapping key, and AES-256-GCM seals the file key. This mirrors the v0x07 multi-recipient model but uses asymmetric keys instead of passwords.
+
+Use the CLI with `--recipient-pubkey` or the library via `EncryptAsymmetric` / `DecryptAsymmetric`.
+
 ### ASCII-armor format
 
 When using `--armor`, the binary format above is wrapped in base64 encoding with PEM-style delimiters:
@@ -624,6 +702,7 @@ trade-offs.
 | V5      | 2024 | Single recipient, streaming, large files; metadata can be public        | Filename/size are sensitive            |
 | V6      | 2026 | Single recipient, streaming, large files, metadata must be confidential | You need zero-cost metadata inspection |
 | V7      | 2026 | Multi-recipient, streaming, large files, metadata must be confidential  | Legacy interop with V4 is required     |
+| V8      | 2026 | Multi-recipient, asymmetric X25519 keys, metadata must be confidential  | Recipients don't have key pairs        |
 
 ## Installation
 
