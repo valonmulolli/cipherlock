@@ -97,6 +97,14 @@ func readMultiHeader(r io.Reader) (multiHeader, error) {
 		return binary.Read(r, binary.LittleEndian, data)
 	}
 
+	var hdrMagic [4]byte
+	if err := read(&hdrMagic); err != nil {
+		return h, ErrInvalidFormat
+	}
+	if hdrMagic != magic {
+		return h, ErrInvalidFormat
+	}
+
 	var version byte
 	if err := read(&version); err != nil {
 		return h, ErrInvalidFormat
@@ -121,41 +129,10 @@ func readMultiHeader(r io.Reader) (multiHeader, error) {
 	for i := range h.Recipients {
 		e := &h.Recipients[i]
 
-		var saltLen uint16
-		if err := read(&saltLen); err != nil {
-			return h, ErrInvalidFormat
-		}
-		if saltLen > maxSaltLen {
-			return h, ErrCorrupted
-		}
-		e.Salt = make([]byte, saltLen)
-		if _, err := io.ReadFull(r, e.Salt); err != nil {
-			return h, ErrInvalidFormat
-		}
-
-		if err := read(&e.Time); err != nil {
-			return h, ErrInvalidFormat
-		}
-		if e.Time == 0 || e.Time > maxTime {
-			return h, ErrCorrupted
-		}
-		if err := read(&e.Memory); err != nil {
-			return h, ErrInvalidFormat
-		}
-		if e.Memory == 0 || e.Memory > maxMemory {
-			return h, ErrCorrupted
-		}
-		if err := read(&e.Threads); err != nil {
-			return h, ErrInvalidFormat
-		}
-		if e.Threads == 0 || e.Threads > maxThreads {
-			return h, ErrCorrupted
-		}
-		if err := read(&e.KeyLen); err != nil {
-			return h, ErrInvalidFormat
-		}
-		if e.KeyLen == 0 || e.KeyLen > maxKeyLen {
-			return h, ErrCorrupted
+		var err error
+		e.Salt, e.Time, e.Memory, e.Threads, e.KeyLen, err = readArgon2Params(r)
+		if err != nil {
+			return h, err
 		}
 		if _, err := io.ReadFull(r, e.KeyNonce[:]); err != nil {
 			return h, ErrInvalidFormat

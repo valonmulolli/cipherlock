@@ -1,3 +1,16 @@
+// WARNING: KDF CANNOT BE CANCELLED.
+//
+// All *Context functions spawn a goroutine that runs the full Argon2id key
+// derivation to completion, even when ctx is cancelled. The goroutine is
+// "leaked" until KDF finishes — it cannot be interrupted.
+//
+// This means:
+//   - A cancelled context does NOT speed up a running KDF.
+//   - Memory and CPU for Argon2id are fully consumed regardless of ctx.
+//   - Only the subsequent encrypt/decrypt phases (AES-GCM) can be cancelled.
+//
+// If you need to bound KDF runtime, adjust Config.Time, Config.Memory, or
+// set a deadline on ctx *before* calling KDF.
 package cipherlock
 
 import (

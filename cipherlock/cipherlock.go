@@ -57,37 +57,27 @@ func DecryptWithMeta(dst io.Writer, src io.Reader, password []byte) (*FileMeta, 
 		return nil, ErrInvalidFormat
 	}
 
-	// Each per-version decrypt helper consumes a fixed prefix from src. We
-	// prepend that prefix back so the helper sees the same byte stream as
-	// the original file. prefixFor returns the bytes to prepend for a helper
-	// that consumed 1 byte (just the version) or 5 bytes (magic+version).
-	prefixFor := func(consumedBytes int) []byte {
-		if consumedBytes == 1 {
-			return []byte{version}
-		}
-		return append(hdrMagic[:], version)
-	}
+	// Every per-version decrypt helper re-reads magic+version from scratch, so
+	// we always prepend the full 5-byte prefix back onto src.
+	prefix := append(hdrMagic[:], version)
 
 	switch version {
 	case formatVersionV2, formatVersionV3:
-		// decryptV2V3 calls readHeader which re-reads magic+version.
-		combined := io.MultiReader(bytes.NewReader(prefixFor(5)), src)
+		combined := io.MultiReader(bytes.NewReader(prefix), src)
 		return nil, decryptV2V3(dst, combined, password)
 	case formatVersionMulti:
-		// decryptMulti reads only the version byte.
-		multiSrc := io.MultiReader(bytes.NewReader(prefixFor(1)), src)
+		multiSrc := io.MultiReader(bytes.NewReader(prefix), src)
 		return nil, decryptMulti(dst, multiSrc, password)
 	case formatVersionStream:
-		streamSrc := io.MultiReader(bytes.NewReader(prefixFor(1)), src)
+		streamSrc := io.MultiReader(bytes.NewReader(prefix), src)
 		meta, streamErr := decryptStream(dst, streamSrc, password)
 		return meta, streamErr
 	case formatVersionStreamV2:
-		streamSrc := io.MultiReader(bytes.NewReader(prefixFor(1)), src)
+		streamSrc := io.MultiReader(bytes.NewReader(prefix), src)
 		meta, streamErr := decryptStreamV2(dst, streamSrc, password)
 		return meta, streamErr
 	case formatVersionStreamMulti:
-		// DecryptStreamMultiFromReader re-reads magic+version.
-		multiSrc := io.MultiReader(bytes.NewReader(prefixFor(5)), src)
+		multiSrc := io.MultiReader(bytes.NewReader(prefix), src)
 		meta, streamErr := DecryptStreamMultiFromReader(dst, multiSrc, password)
 		return meta, streamErr
 	case formatVersionAsymmetric:

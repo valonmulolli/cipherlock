@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 
 	"github.com/valonmulolli/cipherlock/cipherlock"
 )
@@ -36,63 +35,42 @@ write to a different path (the original is preserved).`,
 		source := args[0]
 
 		var oldPwd []byte
-		var err error
 		if keychainFlag {
 			if rekeyKeyFile != "" {
 				return fmt.Errorf("--keychain and --key-file are mutually exclusive")
 			}
-			pwdStr, err := keychainGet(getKeychainAccount(source))
-			if err != nil {
-				return fmt.Errorf("keychain lookup failed: %w", err)
-			}
-			oldPwd = []byte(pwdStr)
-		} else if rekeyPasswordFD != "" {
-			oldPwd, err = readPasswordFromFD(rekeyPasswordFD)
+			pwd, err := resolvePassword(passwordSource{KeychainOn: true, KeychainAc: getKeychainAccount(source)})
 			if err != nil {
 				return err
 			}
-		} else if rekeyPasswordEnv != "" {
-			oldPwd, err = readPasswordFromEnv(rekeyPasswordEnv)
-			if err != nil {
-				return err
-			}
-		} else if rekeyKeyFile != "" {
-			oldPwd, err = os.ReadFile(rekeyKeyFile)
-			if err != nil {
-				return fmt.Errorf("reading key file: %w", err)
-			}
+			oldPwd = pwd
 		} else {
-			fmt.Fprint(os.Stderr, "Enter current password: ")
-			oldPwd, err = term.ReadPassword(int(os.Stdin.Fd()))
-			fmt.Fprintln(os.Stderr)
+			pwd, err := resolvePassword(passwordSource{
+				FD: rekeyPasswordFD, Env: rekeyPasswordEnv, KeyFile: rekeyKeyFile,
+				Label: "Enter current password: ",
+			})
 			if err != nil {
 				return err
 			}
+			oldPwd = pwd
 		}
 
 		var newPwd []byte
-		switch {
-		case rekeyNewPasswordFD != "":
-			newPwd, err = readPasswordFromFD(rekeyNewPasswordFD)
+		if rekeyNewPasswordFD != "" || rekeyNewPasswordEnv != "" || newPwdFile != "" {
+			pwd, err := resolvePassword(passwordSource{
+				FD: rekeyNewPasswordFD, Env: rekeyNewPasswordEnv, KeyFile: newPwdFile,
+			})
 			if err != nil {
 				return err
 			}
-		case rekeyNewPasswordEnv != "":
-			newPwd, err = readPasswordFromEnv(rekeyNewPasswordEnv)
+			newPwd = pwd
+		} else {
+			pwd, err := promptPassword("Enter new password: ", true)
 			if err != nil {
 				return err
 			}
-		case newPwdFile != "":
-			newPwd, err = os.ReadFile(newPwdFile)
-			if err != nil {
-				return fmt.Errorf("reading new key file: %w", err)
-			}
-		default:
-			newPwd, err = promptPassword("Enter new password: ", true)
-			if err != nil {
-				return err
-			}
-			showStrength(newPwd)
+			showStrength(pwd)
+			newPwd = pwd
 		}
 
 		dest := rekeyOutput
@@ -107,6 +85,7 @@ write to a different path (the original is preserved).`,
 		}
 
 		stopKDF := showKDF()
+		var err error
 
 		if dest == source || inPlace {
 			err = cipherlock.ReKeyFile(source, "", oldPwd, newPwd, nil)

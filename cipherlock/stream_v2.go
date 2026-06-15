@@ -90,6 +90,14 @@ func readStreamV2Header(r io.Reader, password []byte) (streamV2Header, []byte, e
 		return binary.Read(r, binary.LittleEndian, data)
 	}
 
+	var hdrMagic [4]byte
+	if err := read(&hdrMagic); err != nil {
+		return sh, nil, ErrInvalidFormat
+	}
+	if hdrMagic != magic {
+		return sh, nil, ErrInvalidFormat
+	}
+
 	var version byte
 	if err := read(&version); err != nil {
 		return sh, nil, ErrInvalidFormat
@@ -102,43 +110,15 @@ func readStreamV2Header(r io.Reader, password []byte) (streamV2Header, []byte, e
 		return sh, nil, ErrInvalidFormat
 	}
 
-	var saltLen uint16
-	if err := read(&saltLen); err != nil {
-		return sh, nil, ErrInvalidFormat
+	salt, time, memory, threads, keyLen, err := readArgon2Params(r)
+	if err != nil {
+		return sh, nil, err
 	}
-	if saltLen > maxSaltLen {
-		return sh, nil, ErrCorrupted
-	}
-
-	sh.Salt = make([]byte, saltLen)
-	if _, err := io.ReadFull(r, sh.Salt); err != nil {
-		return sh, nil, ErrInvalidFormat
-	}
-
-	if err := read(&sh.Time); err != nil {
-		return sh, nil, ErrInvalidFormat
-	}
-	if sh.Time == 0 || sh.Time > maxTime {
-		return sh, nil, ErrCorrupted
-	}
-	if err := read(&sh.Memory); err != nil {
-		return sh, nil, ErrInvalidFormat
-	}
-	if sh.Memory == 0 || sh.Memory > maxMemory {
-		return sh, nil, ErrCorrupted
-	}
-	if err := read(&sh.Threads); err != nil {
-		return sh, nil, ErrInvalidFormat
-	}
-	if sh.Threads == 0 || sh.Threads > maxThreads {
-		return sh, nil, ErrCorrupted
-	}
-	if err := read(&sh.KeyLen); err != nil {
-		return sh, nil, ErrInvalidFormat
-	}
-	if sh.KeyLen == 0 || sh.KeyLen > maxKeyLen {
-		return sh, nil, ErrCorrupted
-	}
+	sh.Salt = salt
+	sh.Time = time
+	sh.Memory = memory
+	sh.Threads = threads
+	sh.KeyLen = keyLen
 	if err := read(&sh.ChunkSize); err != nil {
 		return sh, nil, ErrInvalidFormat
 	}
@@ -438,13 +418,6 @@ func EncryptStreamV2(dst io.Writer, src io.Reader, password []byte, config *Conf
 //
 // It returns ErrInvalidFormat, ErrAuthFailed, ErrCorrupted, or ErrChecksumMismatch.
 func DecryptStreamV2(dst io.Writer, src io.Reader, password []byte) (*FileMeta, error) {
-	var hdrMagic [4]byte
-	if _, err := io.ReadFull(src, hdrMagic[:]); err != nil {
-		return nil, ErrInvalidFormat
-	}
-	if hdrMagic != magic {
-		return nil, ErrInvalidFormat
-	}
 	return decryptStreamV2(dst, src, password)
 }
 
@@ -452,9 +425,12 @@ func DecryptStreamV2(dst io.Writer, src io.Reader, password []byte) (*FileMeta, 
 // reads + decrypts the metadata chunk using the supplied password and KDF parameters.
 // The version byte has already been consumed by the caller.
 func readStreamV2MetaOnly(r io.Reader, password []byte) (*FileMeta, error) {
-	// Prepend the version byte back; readStreamV2Header expects it.
+	// Prepend magic+version; readStreamV2Header expects the full prefix.
+	prefix := make([]byte, 0, 5)
+	prefix = append(prefix, magic[:]...)
+	prefix = append(prefix, formatVersionStreamV2)
 	sh, key, err := readStreamV2Header(
-		io.MultiReader(bytes.NewReader([]byte{formatVersionStreamV2}), r),
+		io.MultiReader(bytes.NewReader(prefix), r),
 		password,
 	)
 	if err != nil {

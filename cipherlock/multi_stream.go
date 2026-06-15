@@ -103,44 +103,13 @@ func readStreamMultiHeader(r io.Reader) (streamMultiHeader, error) {
 	}
 
 	h.Recipients = make([]recipientEntry, numRecipients)
+	var err error
 	for i := range h.Recipients {
 		e := &h.Recipients[i]
 
-		var saltLen uint16
-		if err := read(&saltLen); err != nil {
-			return h, ErrInvalidFormat
-		}
-		if saltLen > maxSaltLen {
-			return h, ErrCorrupted
-		}
-		e.Salt = make([]byte, saltLen)
-		if _, err := io.ReadFull(r, e.Salt); err != nil {
-			return h, ErrInvalidFormat
-		}
-
-		if err := read(&e.Time); err != nil {
-			return h, ErrInvalidFormat
-		}
-		if e.Time == 0 || e.Time > maxTime {
-			return h, ErrCorrupted
-		}
-		if err := read(&e.Memory); err != nil {
-			return h, ErrInvalidFormat
-		}
-		if e.Memory == 0 || e.Memory > maxMemory {
-			return h, ErrCorrupted
-		}
-		if err := read(&e.Threads); err != nil {
-			return h, ErrInvalidFormat
-		}
-		if e.Threads == 0 || e.Threads > maxThreads {
-			return h, ErrCorrupted
-		}
-		if err := read(&e.KeyLen); err != nil {
-			return h, ErrInvalidFormat
-		}
-		if e.KeyLen == 0 || e.KeyLen > maxKeyLen {
-			return h, ErrCorrupted
+		e.Salt, e.Time, e.Memory, e.Threads, e.KeyLen, err = readArgon2Params(r)
+		if err != nil {
+			return h, err
 		}
 		if _, err := io.ReadFull(r, e.KeyNonce[:]); err != nil {
 			return h, ErrInvalidFormat
@@ -498,44 +467,13 @@ func readStreamMultiMeta(r io.Reader, password []byte) (*FileMeta, error) {
 	}
 
 	h.Recipients = make([]recipientEntry, numRecipients)
+	var err error
 	for i := range h.Recipients {
 		e := &h.Recipients[i]
 
-		var saltLen uint16
-		if err := read(&saltLen); err != nil {
-			return nil, ErrInvalidFormat
-		}
-		if saltLen > maxSaltLen {
-			return nil, ErrCorrupted
-		}
-		e.Salt = make([]byte, saltLen)
-		if _, err := io.ReadFull(r, e.Salt); err != nil {
-			return nil, ErrInvalidFormat
-		}
-
-		if err := read(&e.Time); err != nil {
-			return nil, ErrInvalidFormat
-		}
-		if e.Time == 0 || e.Time > maxTime {
-			return nil, ErrCorrupted
-		}
-		if err := read(&e.Memory); err != nil {
-			return nil, ErrInvalidFormat
-		}
-		if e.Memory == 0 || e.Memory > maxMemory {
-			return nil, ErrCorrupted
-		}
-		if err := read(&e.Threads); err != nil {
-			return nil, ErrInvalidFormat
-		}
-		if e.Threads == 0 || e.Threads > maxThreads {
-			return nil, ErrCorrupted
-		}
-		if err := read(&e.KeyLen); err != nil {
-			return nil, ErrInvalidFormat
-		}
-		if e.KeyLen == 0 || e.KeyLen > maxKeyLen {
-			return nil, ErrCorrupted
+		e.Salt, e.Time, e.Memory, e.Threads, e.KeyLen, err = readArgon2Params(r)
+		if err != nil {
+			return nil, err
 		}
 		if _, err := io.ReadFull(r, e.KeyNonce[:]); err != nil {
 			return nil, ErrInvalidFormat

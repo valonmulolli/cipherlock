@@ -31,11 +31,12 @@ var ErrAtLeastOnePassword = errors.New("cipherlock: at least one password requir
 // format version (v0x06 or v0x07) and the caller must supply a password to ReadStreamMetaWithPassword.
 var ErrEncryptedMeta = errors.New("cipherlock: file metadata is encrypted; password required")
 
-// ErrV05MetaUnsupported is returned by EncryptStream (v0x05) when a
-// FileMeta is supplied on the Config. v0x05 stores metadata in the
-// cleartext header, which leaks the original filename and modification
-// time to anyone holding the blob. Use EncryptStreamV2 (v0x06) when
-// metadata is required.
+// ErrV05MetaUnsupported is returned when a caller explicitly tries to attach
+// FileMeta to the v0x05 streaming format, which stores metadata in the
+// cleartext header and leaks the original filename and modification time.
+// EncryptStream no longer returns this error — it auto-upgrades to v0x06
+// when FileMeta is set. The error is retained as a sentinel for code that
+// checks for it programmatically.
 var ErrV05MetaUnsupported = errors.New("cipherlock: EncryptStream (v0x05) cannot attach FileMeta; use EncryptStreamV2")
 
 // ErrConfigInvalid is returned when Config.Validate() detects invalid parameters.
@@ -118,6 +119,49 @@ type header struct {
 	Checksum []byte
 }
 
+// readArgon2Params reads the common Argon2id parameter set shared across all
+// symmetric encryption formats: salt length + salt, time, memory, threads,
+// and key length. Each field is validated against defensive upper bounds to
+// prevent resource-exhaustion attacks.
+func readArgon2Params(r io.Reader) (salt []byte, time uint32, memory uint32, threads uint8, keyLen uint32, err error) {
+	var saltLen uint16
+	if err := binary.Read(r, binary.LittleEndian, &saltLen); err != nil {
+		return nil, 0, 0, 0, 0, ErrInvalidFormat
+	}
+	if saltLen > maxSaltLen {
+		return nil, 0, 0, 0, 0, ErrCorrupted
+	}
+	salt = make([]byte, saltLen)
+	if _, err := io.ReadFull(r, salt); err != nil {
+		return nil, 0, 0, 0, 0, ErrInvalidFormat
+	}
+	if err := binary.Read(r, binary.LittleEndian, &time); err != nil {
+		return nil, 0, 0, 0, 0, ErrInvalidFormat
+	}
+	if time == 0 || time > maxTime {
+		return nil, 0, 0, 0, 0, ErrCorrupted
+	}
+	if err := binary.Read(r, binary.LittleEndian, &memory); err != nil {
+		return nil, 0, 0, 0, 0, ErrInvalidFormat
+	}
+	if memory == 0 || memory > maxMemory {
+		return nil, 0, 0, 0, 0, ErrCorrupted
+	}
+	if err := binary.Read(r, binary.LittleEndian, &threads); err != nil {
+		return nil, 0, 0, 0, 0, ErrInvalidFormat
+	}
+	if threads == 0 || threads > maxThreads {
+		return nil, 0, 0, 0, 0, ErrCorrupted
+	}
+	if err := binary.Read(r, binary.LittleEndian, &keyLen); err != nil {
+		return nil, 0, 0, 0, 0, ErrInvalidFormat
+	}
+	if keyLen == 0 || keyLen > maxKeyLen {
+		return nil, 0, 0, 0, 0, ErrCorrupted
+	}
+	return salt, time, memory, threads, keyLen, nil
+}
+
 func readHeader(r io.Reader) (header, error) {
 	var h header
 
@@ -143,42 +187,10 @@ func readHeader(r io.Reader) (header, error) {
 		return h, ErrVersionMismatch
 	}
 
-	var saltLen uint16
-	if err := binary.Read(r, binary.LittleEndian, &saltLen); err != nil {
-		return h, ErrInvalidFormat
-	}
-	if saltLen > maxSaltLen {
-		return h, ErrCorrupted
-	}
-
-	h.Salt = make([]byte, saltLen)
-	if _, err := io.ReadFull(r, h.Salt); err != nil {
-		return h, ErrInvalidFormat
-	}
-
-	if err := binary.Read(r, binary.LittleEndian, &h.Time); err != nil {
-		return h, ErrInvalidFormat
-	}
-	if h.Time == 0 || h.Time > maxTime {
-		return h, ErrCorrupted
-	}
-	if err := binary.Read(r, binary.LittleEndian, &h.Memory); err != nil {
-		return h, ErrInvalidFormat
-	}
-	if h.Memory == 0 || h.Memory > maxMemory {
-		return h, ErrCorrupted
-	}
-	if err := binary.Read(r, binary.LittleEndian, &h.Threads); err != nil {
-		return h, ErrInvalidFormat
-	}
-	if h.Threads == 0 || h.Threads > maxThreads {
-		return h, ErrCorrupted
-	}
-	if err := binary.Read(r, binary.LittleEndian, &h.KeyLen); err != nil {
-		return h, ErrInvalidFormat
-	}
-	if h.KeyLen == 0 || h.KeyLen > maxKeyLen {
-		return h, ErrCorrupted
+	var err error
+	h.Salt, h.Time, h.Memory, h.Threads, h.KeyLen, err = readArgon2Params(r)
+	if err != nil {
+		return h, err
 	}
 	if err := binary.Read(r, binary.LittleEndian, &h.Nonce); err != nil {
 		return h, ErrInvalidFormat

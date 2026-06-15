@@ -57,7 +57,6 @@ plaintext to stdout.`,
 		}
 
 		var identity *cipherlock.X25519Identity
-		var err error
 		if identityFile != "" {
 			data, err := os.ReadFile(identityFile)
 			if err != nil {
@@ -160,33 +159,20 @@ plaintext to stdout.`,
 			if decryptKeyFile != "" {
 				return fmt.Errorf("--keychain and --key-file are mutually exclusive")
 			}
-			pwdStr, err := keychainGet(getKeychainAccount(args[0]))
-			if err != nil {
-				return fmt.Errorf("keychain lookup failed: %w", err)
-			}
-			password = []byte(pwdStr)
-		} else if decryptPasswordFD != "" {
-			password, err = readPasswordFromFD(decryptPasswordFD)
+			pwd, err := resolvePassword(passwordSource{KeychainOn: true, KeychainAc: getKeychainAccount(args[0])})
 			if err != nil {
 				return err
 			}
-		} else if decryptPasswordEnv != "" {
-			password, err = readPasswordFromEnv(decryptPasswordEnv)
-			if err != nil {
-				return err
-			}
-		} else if decryptKeyFile != "" {
-			password, err = os.ReadFile(decryptKeyFile)
-			if err != nil {
-				return fmt.Errorf("reading key file: %w", err)
-			}
+			password = pwd
 		} else {
-			fmt.Fprint(os.Stderr, "Enter password: ")
-			password, err = term.ReadPassword(int(os.Stdin.Fd()))
-			fmt.Fprintln(os.Stderr)
+			pwd, err := resolvePassword(passwordSource{
+				FD: decryptPasswordFD, Env: decryptPasswordEnv, KeyFile: decryptKeyFile,
+				Label: "Enter password: ",
+			})
 			if err != nil {
 				return err
 			}
+			password = pwd
 		}
 
 		if len(args) == 1 && args[0] == "-" {

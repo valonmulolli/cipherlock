@@ -1,3 +1,5 @@
+// WARNING: V1 compat reads the entire file into memory. Large legacy files
+// (>= 1 GiB) are rejected with ErrCorrupted to prevent OOM crashes.
 package cipherlock
 
 import (
@@ -18,8 +20,21 @@ const (
 
 // DecryptFileV1 decrypts a v1-format encrypted file using PBKDF2 key derivation.
 // This is provided for backward compatibility with legacy cipherlock files.
-// It returns ErrInvalidFormat if the ciphertext is too short.
+//
+// WARNING: The entire file is loaded into memory. Large legacy files may
+// cause out-of-memory crashes. Files >= 1 GiB are rejected upfront.
+//
+// It returns ErrCorrupted if the ciphertext is too large (>= 1 GiB) and
+// ErrInvalidFormat if the ciphertext is too short.
 func DecryptFileV1(source, dest string, password []byte) error {
+	fi, err := os.Stat(source)
+	if err != nil {
+		return err
+	}
+	if fi.Size() >= 1<<30 {
+		return ErrCorrupted
+	}
+
 	ciphertext, err := os.ReadFile(source)
 	if err != nil {
 		return err

@@ -58,7 +58,6 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 		}
 
 		var passwords [][]byte
-		var err error
 
 		if len(recipientPubkeys) > 0 && len(recipientPwds) == 0 && !keychainFlag && keyFilePath == "" && passwordEnv == "" && passwordFD == "" && !genPassword {
 			passwords = nil
@@ -69,77 +68,34 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			if len(recipientPwds) > 0 {
 				return fmt.Errorf("--keychain cannot be used with --recipient")
 			}
-			pwdStr, err := keychainGet(getKeychainAccount(args[0]))
+			pwd, err := resolvePassword(passwordSource{KeychainOn: true, KeychainAc: getKeychainAccount(args[0])})
 			if err != nil {
-				return fmt.Errorf("keychain lookup failed: %w", err)
+				return err
 			}
-			passwords = [][]byte{[]byte(pwdStr)}
+			passwords = [][]byte{pwd}
 		} else if len(recipientPwds) > 0 {
 			for _, r := range recipientPwds {
 				passwords = append(passwords, []byte(r))
 			}
-			var primary []byte
-			switch {
-			case passwordFD != "":
-				primary, err = readPasswordFromFD(passwordFD)
-			case passwordEnv != "":
-				primary, err = readPasswordFromEnv(passwordEnv)
-			case keyFilePath != "":
-				primary, err = os.ReadFile(keyFilePath)
-			default:
-				primary, err = promptPassword("Enter your password: ", true)
-				if err == nil {
-					showStrength(primary)
-				}
-			}
+			primary, err := resolvePassword(passwordSource{
+				FD: passwordFD, Env: passwordEnv, KeyFile: keyFilePath,
+				Label: "Enter your password: ",
+			})
 			if err != nil {
 				return err
 			}
+			showStrength(primary)
 			passwords = append([][]byte{primary}, passwords...)
 		} else {
-			switch {
-			case passwordFD != "":
-				var pwd []byte
-				pwd, err = readPasswordFromFD(passwordFD)
-				if err != nil {
-					return err
-				}
-				passwords = [][]byte{pwd}
-			case passwordEnv != "":
-				var pwd []byte
-				pwd, err = readPasswordFromEnv(passwordEnv)
-				if err != nil {
-					return err
-				}
-				passwords = [][]byte{pwd}
-			case keyFilePath != "":
-				var pwd []byte
-				pwd, err = os.ReadFile(keyFilePath)
-				if err != nil {
-					return fmt.Errorf("reading key file: %w", err)
-				}
-				passwords = [][]byte{pwd}
-			case genPassword:
-				var pwd []byte
-				pwd, err = generatePassword(32)
-				if err != nil {
-					return err
-				}
-				if quiet {
-					fmt.Fprintln(os.Stderr, string(pwd))
-				} else {
-					fmt.Fprintln(os.Stderr, "password:", string(pwd))
-				}
-				passwords = [][]byte{pwd}
-			default:
-				var pwd []byte
-				pwd, err = promptPassword("Enter password: ", true)
-				if err != nil {
-					return err
-				}
-				showStrength(pwd)
-				passwords = [][]byte{pwd}
+			primary, err := resolvePassword(passwordSource{
+				FD: passwordFD, Env: passwordEnv, KeyFile: keyFilePath,
+				GenPwd: genPassword, Label: "Enter password: ",
+			})
+			if err != nil {
+				return err
 			}
+			showStrength(primary)
+			passwords = [][]byte{primary}
 		}
 
 		var asymmetricRecipients []*cipherlock.X25519Recipient
@@ -385,8 +341,7 @@ func encryptFile(srcPath, dstPath string, info os.FileInfo, passwords [][]byte, 
 
 func encryptToWriter(w io.Writer, r io.Reader, passwords [][]byte, asymmetricRecipients []*cipherlock.X25519Recipient, config *cipherlock.Config) error {
 	if len(asymmetricRecipients) > 0 {
-		var encryptFn func(io.Writer, io.Reader, []*cipherlock.X25519Recipient, *cipherlock.Config) error
-		encryptFn = func(dst io.Writer, src io.Reader, recs []*cipherlock.X25519Recipient, cfg *cipherlock.Config) error {
+		encryptFn := func(dst io.Writer, src io.Reader, recs []*cipherlock.X25519Recipient, cfg *cipherlock.Config) error {
 			return cipherlock.EncryptAsymmetric(dst, src, recs, cfg)
 		}
 		if !armorMode {

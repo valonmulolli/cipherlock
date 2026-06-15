@@ -207,12 +207,12 @@ func TestSerializeDeserializeIdentityWithPassphrase(t *testing.T) {
 		t.Fatalf("SerializeX25519Identity with passphrase: %v", err)
 	}
 
-	deserialized, err := DeserializeX25519Identity(serialized, nil)
+	_, err = DeserializeX25519Identity(serialized, nil)
 	if !errors.Is(err, ErrIdentityNeedsPassphrase) {
 		t.Fatalf("expected ErrIdentityNeedsPassphrase, got %v", err)
 	}
 
-	deserialized, err = DeserializeX25519Identity(serialized, passphrase)
+	deserialized, err := DeserializeX25519Identity(serialized, passphrase)
 	if err != nil {
 		t.Fatalf("DeserializeX25519Identity with passphrase: %v", err)
 	}

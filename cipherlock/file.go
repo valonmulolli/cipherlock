@@ -10,9 +10,11 @@ import (
 // EncryptFile encrypts a source file and writes the ciphertext to a destination file.
 // If dest is empty, the source path with a .encrypted suffix is used.
 //
-// When config.FileMeta is set the output is a v0x06 file so the metadata
-// chunk is encrypted (v0x05 would leak the original filename and mtime
-// in the cleartext header). Without FileMeta the output is v0x05.
+// The output format is v0x05 (streaming) by default. When config.FileMeta
+// is set the output is v0x06 so the metadata chunk is encrypted (v0x05
+// would leak the original filename and mtime in the cleartext header).
+// EncryptFile explicitly selects EncryptStreamV2 in that case; it never
+// returns ErrV05MetaUnsupported.
 //
 // It returns errors from os.Open/os.Create, or any error returned by
 // Encrypt or EncryptStreamV2 (see those functions for details).

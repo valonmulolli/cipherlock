@@ -86,6 +86,15 @@ func readStreamHeader(r io.Reader, password []byte) (sh streamHeader, key []byte
 		err = binary.Read(r, binary.LittleEndian, data)
 	}
 
+	var hdrMagic [4]byte
+	read(&hdrMagic)
+	if err != nil {
+		return sh, nil, ErrInvalidFormat
+	}
+	if hdrMagic != magic {
+		return sh, nil, ErrInvalidFormat
+	}
+
 	var version byte
 	read(&version)
 	if err != nil {
@@ -96,36 +105,13 @@ func readStreamHeader(r io.Reader, password []byte) (sh streamHeader, key []byte
 	}
 
 	read(&sh.Flags)
-
-	var saltLen uint16
-	read(&saltLen)
 	if err != nil {
 		return sh, nil, ErrInvalidFormat
 	}
-	if saltLen > maxSaltLen {
-		return sh, nil, ErrCorrupted
-	}
 
-	sh.Salt = make([]byte, saltLen)
-	if _, err = io.ReadFull(r, sh.Salt); err != nil {
-		return sh, nil, ErrInvalidFormat
-	}
-
-	read(&sh.Time)
-	if sh.Time == 0 || sh.Time > maxTime {
-		return sh, nil, ErrCorrupted
-	}
-	read(&sh.Memory)
-	if sh.Memory == 0 || sh.Memory > maxMemory {
-		return sh, nil, ErrCorrupted
-	}
-	read(&sh.Threads)
-	if sh.Threads == 0 || sh.Threads > maxThreads {
-		return sh, nil, ErrCorrupted
-	}
-	read(&sh.KeyLen)
-	if sh.KeyLen == 0 || sh.KeyLen > maxKeyLen {
-		return sh, nil, ErrCorrupted
+	sh.Salt, sh.Time, sh.Memory, sh.Threads, sh.KeyLen, err = readArgon2Params(r)
+	if err != nil {
+		return sh, nil, err
 	}
 	read(&sh.ChunkSize)
 	if err != nil {
@@ -235,23 +221,20 @@ func encryptStream(dst io.Writer, src io.Reader, key []byte, chunkSize int, hash
 
 // EncryptStream encrypts src using password with a streaming (chunked) format.
 // It supports large data sizes by processing data in chunks. The config controls Argon2
-// parameters, chunk size, and optional checksumming.
+// parameters, chunk size, checksumming, and optional FileMeta.
 //
-// It returns ErrV05MetaUnsupported when config.FileMeta is non-nil (use
-// EncryptStreamV2 for metadata), or a ChunkSize bound error when
-// config.ChunkSize exceeds maxChunkSize.
+// When config.FileMeta is set, EncryptStream automatically produces the v0x06 format
+// (encrypted metadata chunk) instead of v0x05 (cleartext metadata). This avoids leaking
+// the original filename, size, or modification time in the header.
+//
+// It returns a ChunkSize bound error when config.ChunkSize exceeds maxChunkSize.
 func EncryptStream(dst io.Writer, src io.Reader, password []byte, config *Config) error {
 	if config == nil {
 		config = DefaultConfig
 	}
 
-	// v0x05 stores the FileMeta in the cleartext header. That means
-	// anyone holding the ciphertext can read the original filename
-	// and modification time. If the caller really wants metadata
-	// attached, they should use EncryptStreamV2 (v0x06) which
-	// encrypts the metadata chunk under the same key as the data.
 	if config.FileMeta != nil {
-		return ErrV05MetaUnsupported
+		return EncryptStreamV2(dst, src, password, config)
 	}
 
 	// Take a local copy so we never mutate the caller's config (or the shared
