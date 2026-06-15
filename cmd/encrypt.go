@@ -2,12 +2,14 @@ package cmd
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -16,17 +18,21 @@ import (
 )
 
 var (
-	outputPath    string
-	genPassword   bool
-	armorMode     bool
-	keyFilePath   string
-	checksumFlag  bool
-	recipientPwds []string
-	profileName   string
-	outDir        string
-	keychainFlag  bool
-	saveKeychain  bool
-	forceEncrypt  bool
+	outputPath       string
+	genPassword      bool
+	armorMode        bool
+	keyFilePath      string
+	checksumFlag     bool
+	recipientPwds    []string
+	recipientPubkeys []string
+	passwordEnv      string
+	passwordFD       string
+	profileName      string
+	outDir           string
+	keychainFlag     bool
+	saveKeychain     bool
+	forceEncrypt     bool
+	jobs             int
 )
 
 var encryptCmd = &cobra.Command{
@@ -54,7 +60,9 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 		var passwords [][]byte
 		var err error
 
-		if keychainFlag {
+		if len(recipientPubkeys) > 0 && len(recipientPwds) == 0 && !keychainFlag && keyFilePath == "" && passwordEnv == "" && passwordFD == "" && !genPassword {
+			passwords = nil
+		} else if keychainFlag {
 			if keyFilePath != "" {
 				return fmt.Errorf("--keychain and --key-file are mutually exclusive")
 			}
@@ -70,52 +78,92 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			for _, r := range recipientPwds {
 				passwords = append(passwords, []byte(r))
 			}
-			if keyFilePath != "" {
+			var primary []byte
+			switch {
+			case passwordFD != "":
+				primary, err = readPasswordFromFD(passwordFD)
+			case passwordEnv != "":
+				primary, err = readPasswordFromEnv(passwordEnv)
+			case keyFilePath != "":
+				primary, err = os.ReadFile(keyFilePath)
+			default:
+				primary, err = promptPassword("Enter your password: ", true)
+				if err == nil {
+					showStrength(primary)
+				}
+			}
+			if err != nil {
+				return err
+			}
+			passwords = append([][]byte{primary}, passwords...)
+		} else {
+			switch {
+			case passwordFD != "":
+				var pwd []byte
+				pwd, err = readPasswordFromFD(passwordFD)
+				if err != nil {
+					return err
+				}
+				passwords = [][]byte{pwd}
+			case passwordEnv != "":
+				var pwd []byte
+				pwd, err = readPasswordFromEnv(passwordEnv)
+				if err != nil {
+					return err
+				}
+				passwords = [][]byte{pwd}
+			case keyFilePath != "":
 				var pwd []byte
 				pwd, err = os.ReadFile(keyFilePath)
 				if err != nil {
 					return fmt.Errorf("reading key file: %w", err)
 				}
-				passwords = append([][]byte{pwd}, passwords...)
-			} else {
+				passwords = [][]byte{pwd}
+			case genPassword:
 				var pwd []byte
-				pwd, err = promptPassword("Enter your password: ", true)
+				pwd, err = generatePassword(32)
+				if err != nil {
+					return err
+				}
+				if quiet {
+					fmt.Fprintln(os.Stderr, string(pwd))
+				} else {
+					fmt.Fprintln(os.Stderr, "password:", string(pwd))
+				}
+				passwords = [][]byte{pwd}
+			default:
+				var pwd []byte
+				pwd, err = promptPassword("Enter password: ", true)
 				if err != nil {
 					return err
 				}
 				showStrength(pwd)
-				passwords = append([][]byte{pwd}, passwords...)
+				passwords = [][]byte{pwd}
 			}
-		} else if keyFilePath != "" {
-			var pwd []byte
-			pwd, err = os.ReadFile(keyFilePath)
-			if err != nil {
-				return fmt.Errorf("reading key file: %w", err)
-			}
-			passwords = [][]byte{pwd}
-		} else if genPassword {
-			var pwd []byte
-			pwd, err = generatePassword(32)
-			if err != nil {
-				return err
-			}
-			if quiet {
-				fmt.Fprintln(os.Stderr, string(pwd))
-			} else {
-				fmt.Fprintln(os.Stderr, "password:", string(pwd))
-			}
-			passwords = [][]byte{pwd}
-		} else {
-			var pwd []byte
-			pwd, err = promptPassword("Enter password: ", true)
-			if err != nil {
-				return err
-			}
-			showStrength(pwd)
-			passwords = [][]byte{pwd}
 		}
 
-		if armorMode {
+		var asymmetricRecipients []*cipherlock.X25519Recipient
+
+		if len(recipientPubkeys) > 0 {
+			for _, path := range recipientPubkeys {
+				data, err := os.ReadFile(path)
+				if err != nil {
+					return fmt.Errorf("reading recipient public key %q: %w", path, err)
+				}
+				raw := strings.TrimSpace(string(data))
+				pubKey, err := base64.StdEncoding.DecodeString(raw)
+				if err != nil {
+					return fmt.Errorf("decoding public key %q: %w", path, err)
+				}
+				rec, err := cipherlock.NewX25519Recipient(pubKey)
+				if err != nil {
+					return fmt.Errorf("invalid public key %q: %w", path, err)
+				}
+				asymmetricRecipients = append(asymmetricRecipients, rec)
+			}
+		}
+
+		if armorMode && len(asymmetricRecipients) == 0 {
 			for _, p := range passwords {
 				if len(p) == 0 {
 					return errors.New("password cannot be empty in armor mode")
@@ -145,7 +193,7 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 		}
 
 		if len(args) == 1 && args[0] == "-" {
-			return encryptStdin(passwords, config)
+			return encryptStdin(passwords, asymmetricRecipients, config)
 		}
 
 		if len(args) == 1 {
@@ -154,6 +202,9 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 				return err
 			}
 			if info.IsDir() {
+				if len(asymmetricRecipients) > 0 {
+					return errors.New("asymmetric encryption not supported for directories")
+				}
 				if len(passwords) > 1 {
 					return errors.New("multi-recipient encryption not supported for directories")
 				}
@@ -171,6 +222,28 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 		}
 
 		var destPaths []string
+		if jobs > 0 {
+			err := processFilesInParallel(args, func(src string, info os.FileInfo) (string, error) {
+				dest := outputPath
+				if inPlace {
+					dest = src
+				} else if dest == "" {
+					if outDir != "" {
+						dest = filepath.Join(outDir, filepath.Base(src)+".encrypted")
+					} else {
+						dest = src + ".encrypted"
+					}
+				}
+				if !forceEncrypt && !inPlace {
+					if _, err := os.Stat(dest); err == nil {
+						return "", fmt.Errorf("output %q exists; use --force to overwrite", dest)
+					}
+				}
+				return dest, nil
+			}, batchEncryptFunc(passwords, asymmetricRecipients, config), jobs)
+			return err
+		}
+
 		for _, src := range args {
 			info, err := os.Stat(src)
 			if err != nil {
@@ -197,7 +270,7 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 				}
 			}
 
-			if err := encryptFile(src, dest, info, passwords, config); err != nil {
+			if err := encryptFile(src, dest, info, passwords, asymmetricRecipients, config); err != nil {
 				return err
 			}
 			destPaths = append(destPaths, dest)
@@ -224,12 +297,12 @@ func validateEncryptFlags(args []string, output, outDir string, inPlace bool) er
 	return nil
 }
 
-func encryptStdin(passwords [][]byte, config *cipherlock.Config) error {
+func encryptStdin(passwords [][]byte, asymmetricRecipients []*cipherlock.X25519Recipient, config *cipherlock.Config) error {
 	out := outputPath
 	stopKDF := showKDF()
 
 	if out == "" {
-		err := encryptToWriter(os.Stdout, os.Stdin, passwords, config)
+		err := encryptToWriter(os.Stdout, os.Stdin, passwords, asymmetricRecipients, config)
 		stopKDF()
 		return err
 	}
@@ -240,12 +313,12 @@ func encryptStdin(passwords [][]byte, config *cipherlock.Config) error {
 	}
 	defer f.Close()
 
-	err = encryptToWriter(f, os.Stdin, passwords, config)
+	err = encryptToWriter(f, os.Stdin, passwords, asymmetricRecipients, config)
 	stopKDF()
 	return err
 }
 
-func encryptFile(srcPath, dstPath string, info os.FileInfo, passwords [][]byte, config *cipherlock.Config) error {
+func encryptFile(srcPath, dstPath string, info os.FileInfo, passwords [][]byte, asymmetricRecipients []*cipherlock.X25519Recipient, config *cipherlock.Config) error {
 	if info == nil {
 		var err error
 		info, err = os.Stat(srcPath)
@@ -254,7 +327,8 @@ func encryptFile(srcPath, dstPath string, info os.FileInfo, passwords [][]byte, 
 		}
 	}
 
-	config.FileMeta = &cipherlock.FileMeta{
+	cfg := *config
+	cfg.FileMeta = &cipherlock.FileMeta{
 		Name:    info.Name(),
 		Size:    info.Size(),
 		ModTime: info.ModTime(),
@@ -276,7 +350,7 @@ func encryptFile(srcPath, dstPath string, info os.FileInfo, passwords [][]byte, 
 			return err
 		}
 
-		err = encryptToWriter(destFile, srcReader, passwords, config)
+		err = encryptToWriter(destFile, srcReader, passwords, asymmetricRecipients, &cfg)
 		destFile.Close()
 		stopKDF()
 		if err != nil {
@@ -304,12 +378,25 @@ func encryptFile(srcPath, dstPath string, info os.FileInfo, passwords [][]byte, 
 	}
 	defer destFile.Close()
 
-	err = encryptToWriter(destFile, srcReader, passwords, config)
+	err = encryptToWriter(destFile, srcReader, passwords, asymmetricRecipients, &cfg)
 	stopKDF()
 	return err
 }
 
-func encryptToWriter(w io.Writer, r io.Reader, passwords [][]byte, config *cipherlock.Config) error {
+func encryptToWriter(w io.Writer, r io.Reader, passwords [][]byte, asymmetricRecipients []*cipherlock.X25519Recipient, config *cipherlock.Config) error {
+	if len(asymmetricRecipients) > 0 {
+		var encryptFn func(io.Writer, io.Reader, []*cipherlock.X25519Recipient, *cipherlock.Config) error
+		encryptFn = func(dst io.Writer, src io.Reader, recs []*cipherlock.X25519Recipient, cfg *cipherlock.Config) error {
+			return cipherlock.EncryptAsymmetric(dst, src, recs, cfg)
+		}
+		if !armorMode {
+			return encryptFn(w, r, asymmetricRecipients, config)
+		}
+		aw := cipherlock.NewArmorWriter(w)
+		defer aw.Close() //nolint:errcheck
+		return encryptFn(aw, r, asymmetricRecipients, config)
+	}
+
 	var encryptFn func(io.Writer, io.Reader, [][]byte, *cipherlock.Config) error
 	if len(passwords) > 1 {
 		encryptFn = func(dst io.Writer, src io.Reader, pwds [][]byte, cfg *cipherlock.Config) error {
@@ -339,11 +426,15 @@ func init() {
 	encryptCmd.Flags().StringVar(&keyFilePath, "key-file", "", "read password from file instead of prompting")
 	encryptCmd.Flags().BoolVar(&checksumFlag, "checksum", false, "embed SHA-256 checksum of plaintext and verify on decrypt")
 	encryptCmd.Flags().StringArrayVar(&recipientPwds, "recipient", nil, "additional recipient password (can be specified multiple times)")
+	encryptCmd.Flags().StringArrayVar(&recipientPubkeys, "recipient-pubkey", nil, "path to recipient's X25519 public key file (can be specified multiple times)")
 	encryptCmd.Flags().StringVar(&profileName, "profile", "", "use a saved configuration profile")
 	encryptCmd.Flags().StringVar(&outDir, "out-dir", "", "output directory for batch encryption")
 	encryptCmd.Flags().BoolVar(&keychainFlag, "keychain", false, "read password from system keychain")
 	encryptCmd.Flags().BoolVar(&saveKeychain, "save-keychain", false, "save password to system keychain after encryption")
 	encryptCmd.Flags().BoolVar(&forceEncrypt, "force", false, "overwrite existing output files without prompting")
+	encryptCmd.Flags().StringVar(&passwordEnv, "password-env", "", "read password from environment variable")
+	encryptCmd.Flags().StringVar(&passwordFD, "password-fd", "", "read password from file descriptor number (e.g. 0 for stdin pipe)")
+	encryptCmd.Flags().IntVarP(&jobs, "jobs", "j", 0, "number of parallel jobs (default: sequential)")
 	encryptCmd.RegisterFlagCompletionFunc("profile", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
 		return profileNames(), cobra.ShellCompDirectiveDefault
 	})

@@ -41,6 +41,13 @@ var ErrV05MetaUnsupported = errors.New("cipherlock: EncryptStream (v0x05) cannot
 // ErrConfigInvalid is returned when Config.Validate() detects invalid parameters.
 var ErrConfigInvalid = errors.New("cipherlock: invalid configuration")
 
+// ErrUnsupportedIdentity is returned when an asymmetric identity type is not recognized.
+var ErrUnsupportedIdentity = errors.New("cipherlock: unsupported identity type")
+
+// ErrIdentityNeedsPassphrase is returned when attempting to deserialize an
+// encrypted identity without providing a passphrase.
+var ErrIdentityNeedsPassphrase = errors.New("cipherlock: identity is encrypted, provide a passphrase")
+
 const (
 	formatVersionV2          byte = 0x02
 	formatVersionV3          byte = 0x03
@@ -48,8 +55,13 @@ const (
 	formatVersionStream      byte = 0x05
 	formatVersionStreamV2    byte = 0x06
 	formatVersionStreamMulti byte = 0x07
+	formatVersionAsymmetric  byte = 0x08
+	identityTypeX25519       byte = 0x01
 	nonceSize                     = 12
 	checksumSize                  = 32
+	x25519PublicKeySize           = 32
+	x25519PrivateKeySize          = 32
+	sealedKeySize                 = 32 + 16 // 32-byte key + 16-byte GCM tag
 
 	flagChecksum    byte = 1 << 0
 	flagHasMetadata byte = 1 << 1
@@ -88,6 +100,10 @@ const maxTime = 60
 // maxThreads bounds the Argon2id Threads parameter. Real Argon2id is rarely
 // run with more than 8 threads; 32 is a generous upper bound.
 const maxThreads uint8 = 32
+
+// maxAsymmetricRecipients bounds the number of asymmetric recipients in a v0x08
+// header. Each recipient adds ~80 bytes of overhead; 64 keeps headers well under 8KB.
+const maxAsymmetricRecipients = 64
 
 type header struct {
 	Magic    [4]byte

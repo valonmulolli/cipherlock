@@ -15,12 +15,15 @@ import (
 )
 
 var (
-	decryptOutput  string
-	decryptKeyFile string
-	decryptOutDir  string
-	checkOnly      bool
-	forceOverwrite bool
-	decryptDirMode bool
+	decryptOutput      string
+	decryptKeyFile     string
+	decryptOutDir      string
+	checkOnly          bool
+	forceOverwrite     bool
+	decryptDirMode     bool
+	identityFile       string
+	decryptPasswordFD  string
+	decryptPasswordEnv string
 )
 
 var decryptCmd = &cobra.Command{
@@ -53,8 +56,106 @@ plaintext to stdout.`,
 			return fmt.Errorf("--output cannot be used with multiple input files")
 		}
 
-		var password []byte
+		var identity *cipherlock.X25519Identity
 		var err error
+		if identityFile != "" {
+			data, err := os.ReadFile(identityFile)
+			if err != nil {
+				return fmt.Errorf("reading identity file: %w", err)
+			}
+			identity, err = cipherlock.DeserializeX25519Identity(data, nil)
+			if errors.Is(err, cipherlock.ErrIdentityNeedsPassphrase) {
+				passphrase, e := readIdentityPassphrase()
+				if e != nil {
+					return fmt.Errorf("parsing identity file: %w", e)
+				}
+				identity, err = cipherlock.DeserializeX25519Identity(data, passphrase)
+			}
+			if err != nil {
+				return fmt.Errorf("parsing identity file: %w", err)
+			}
+		}
+
+		if identity != nil {
+			if keychainFlag {
+				return fmt.Errorf("--keychain cannot be used with --identity")
+			}
+			if decryptKeyFile != "" {
+				return fmt.Errorf("--key-file cannot be used with --identity")
+			}
+			if decryptDirMode {
+				return fmt.Errorf("--dir cannot be used with --identity")
+			}
+
+			var destPaths []string
+			for _, src := range args {
+				if src == "-" {
+					err := decryptAsymmetricFromReader(os.Stdout, os.Stdin, identity)
+					return err
+				}
+
+				info, err := os.Stat(src)
+				if err != nil {
+					return err
+				}
+
+				if checkOnly {
+					info, err := os.Stat(src)
+					if err != nil {
+						return err
+					}
+					srcFile, err := os.Open(src)
+					if err != nil {
+						return err
+					}
+					var reader io.Reader
+					if info.Size() > 0 && info.Mode().IsRegular() {
+						reader = progressReader(srcFile, info.Size(), "checking")
+					} else {
+						reader = srcFile
+					}
+					err = decryptAsymmetricFromReader(io.Discard, reader, identity)
+					srcFile.Close()
+					if err != nil {
+						if isAuthError(err) {
+							return errors.New("decryption failed: wrong identity or corrupted data")
+						}
+						return err
+					}
+					return nil
+				}
+
+				dest := decryptOutput
+				if inPlace {
+					dest = src
+				} else if dest == "" {
+					if decryptOutDir != "" {
+						dest = filepath.Join(decryptOutDir, filepath.Base(defaultDecryptPath(src)))
+					} else {
+						dest = defaultDecryptPath(src)
+					}
+				}
+
+				if !forceOverwrite && !inPlace {
+					if _, err := os.Stat(dest); err == nil {
+						return fmt.Errorf("output %q exists; use --force to overwrite", dest)
+					}
+				}
+
+				err = decryptAsymmetricFile(dest, src, info, identity)
+				if err != nil {
+					if isAuthError(err) {
+						return errors.New("decryption failed: wrong identity or corrupted data")
+					}
+					return err
+				}
+				destPaths = append(destPaths, dest)
+			}
+			_ = destPaths
+			return nil
+		}
+
+		var password []byte
 		if keychainFlag {
 			if decryptKeyFile != "" {
 				return fmt.Errorf("--keychain and --key-file are mutually exclusive")
@@ -64,6 +165,16 @@ plaintext to stdout.`,
 				return fmt.Errorf("keychain lookup failed: %w", err)
 			}
 			password = []byte(pwdStr)
+		} else if decryptPasswordFD != "" {
+			password, err = readPasswordFromFD(decryptPasswordFD)
+			if err != nil {
+				return err
+			}
+		} else if decryptPasswordEnv != "" {
+			password, err = readPasswordFromEnv(decryptPasswordEnv)
+			if err != nil {
+				return err
+			}
 		} else if decryptKeyFile != "" {
 			password, err = os.ReadFile(decryptKeyFile)
 			if err != nil {
@@ -89,6 +200,31 @@ plaintext to stdout.`,
 		}
 
 		var destPaths []string
+		if jobs > 0 {
+			err := processFilesInParallel(args, func(src string, info os.FileInfo) (string, error) {
+				if checkOnly || decryptDirMode {
+					return "", nil
+				}
+				dest := decryptOutput
+				if inPlace {
+					dest = src
+				} else if dest == "" {
+					if decryptOutDir != "" {
+						dest = filepath.Join(decryptOutDir, filepath.Base(defaultDecryptPath(src)))
+					} else {
+						dest = defaultDecryptPath(src)
+					}
+				}
+				if !forceOverwrite && !inPlace {
+					if _, err := os.Stat(dest); err == nil {
+						return "", fmt.Errorf("output %q exists; use --force to overwrite", dest)
+					}
+				}
+				return dest, nil
+			}, batchDecryptFunc(password, identity), jobs)
+			return err
+		}
+
 		for _, src := range args {
 			info, err := os.Stat(src)
 			if err != nil {
@@ -306,6 +442,67 @@ func decryptFromReader(w io.Writer, r io.Reader, password []byte) error {
 	return cipherlock.Decrypt(w, reader, password)
 }
 
+func decryptAsymmetricFromReader(w io.Writer, r io.Reader, identity *cipherlock.X25519Identity) error {
+	ok, reader, err := cipherlock.IsArmoredReader(r)
+	if err != nil {
+		return err
+	}
+
+	if ok {
+		ur, err := cipherlock.NewUnarmorReader(reader)
+		if err != nil {
+			return err
+		}
+		return cipherlock.DecryptAsymmetric(w, ur, identity)
+	}
+
+	return cipherlock.DecryptAsymmetric(w, reader, identity)
+}
+
+func decryptAsymmetricFile(dstPath string, srcPath string, info os.FileInfo, identity *cipherlock.X25519Identity) error {
+	srcFile, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	var reader io.Reader
+	if info.Size() > 0 && info.Mode().IsRegular() {
+		reader = progressReader(srcFile, info.Size(), "decrypting")
+	} else {
+		reader = srcFile
+	}
+
+	if inPlace {
+		tmp := srcPath + ".tmp"
+		destFile, err := os.Create(tmp)
+		if err != nil {
+			return err
+		}
+
+		err = decryptAsymmetricFromReader(destFile, reader, identity)
+		destFile.Close()
+		if err != nil {
+			os.Remove(tmp)
+			return err
+		}
+
+		if err := cipherlock.Shred(srcPath); err != nil {
+			os.Remove(tmp)
+			return err
+		}
+		return os.Rename(tmp, srcPath)
+	}
+
+	destFile, err := os.Create(dstPath)
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+
+	return decryptAsymmetricFromReader(destFile, reader, identity)
+}
+
 func restoreMeta(encPath, decPath string, password []byte, userSetOutput bool) {
 	encFile, err := os.Open(encPath)
 	if err != nil {
@@ -355,6 +552,19 @@ func defaultDecryptPath(source string) string {
 	return source + ".decrypted"
 }
 
+func readIdentityPassphrase() ([]byte, error) {
+	fmt.Fprint(os.Stderr, "Identity passphrase: ")
+	passphrase, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Fprintln(os.Stderr)
+	if err != nil {
+		return nil, err
+	}
+	if len(passphrase) == 0 {
+		return nil, errors.New("passphrase required for encrypted identity")
+	}
+	return passphrase, nil
+}
+
 func init() {
 	rootCmd.AddCommand(decryptCmd)
 	decryptCmd.Flags().StringVarP(&decryptOutput, "output", "o", "", "output file path")
@@ -365,4 +575,8 @@ func init() {
 	decryptCmd.Flags().BoolVar(&checkOnly, "check", false, "verify password and format without writing output")
 	decryptCmd.Flags().BoolVar(&forceOverwrite, "force", false, "overwrite existing output files without prompting")
 	decryptCmd.Flags().BoolVar(&decryptDirMode, "dir", false, "decrypt directory archive and extract")
+	decryptCmd.Flags().StringVar(&identityFile, "identity", "", "path to X25519 identity (private key) file for asymmetric decryption")
+	decryptCmd.Flags().StringVar(&decryptPasswordEnv, "password-env", "", "read password from environment variable")
+	decryptCmd.Flags().StringVar(&decryptPasswordFD, "password-fd", "", "read password from file descriptor number (e.g. 0 for stdin pipe)")
+	decryptCmd.Flags().IntVarP(&jobs, "jobs", "j", 0, "number of parallel workers (default: sequential)")
 }

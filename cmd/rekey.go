@@ -12,10 +12,14 @@ import (
 )
 
 var (
-	rekeyOutput  string
-	newPwdFile   string
-	rekeyForce   bool
-	rekeyKeyFile string
+	rekeyOutput         string
+	newPwdFile          string
+	rekeyForce          bool
+	rekeyKeyFile        string
+	rekeyPasswordEnv    string
+	rekeyPasswordFD     string
+	rekeyNewPasswordEnv string
+	rekeyNewPasswordFD  string
 )
 
 var rekeyCmd = &cobra.Command{
@@ -42,6 +46,16 @@ write to a different path (the original is preserved).`,
 				return fmt.Errorf("keychain lookup failed: %w", err)
 			}
 			oldPwd = []byte(pwdStr)
+		} else if rekeyPasswordFD != "" {
+			oldPwd, err = readPasswordFromFD(rekeyPasswordFD)
+			if err != nil {
+				return err
+			}
+		} else if rekeyPasswordEnv != "" {
+			oldPwd, err = readPasswordFromEnv(rekeyPasswordEnv)
+			if err != nil {
+				return err
+			}
 		} else if rekeyKeyFile != "" {
 			oldPwd, err = os.ReadFile(rekeyKeyFile)
 			if err != nil {
@@ -57,12 +71,23 @@ write to a different path (the original is preserved).`,
 		}
 
 		var newPwd []byte
-		if newPwdFile != "" {
+		switch {
+		case rekeyNewPasswordFD != "":
+			newPwd, err = readPasswordFromFD(rekeyNewPasswordFD)
+			if err != nil {
+				return err
+			}
+		case rekeyNewPasswordEnv != "":
+			newPwd, err = readPasswordFromEnv(rekeyNewPasswordEnv)
+			if err != nil {
+				return err
+			}
+		case newPwdFile != "":
 			newPwd, err = os.ReadFile(newPwdFile)
 			if err != nil {
 				return fmt.Errorf("reading new key file: %w", err)
 			}
-		} else {
+		default:
 			newPwd, err = promptPassword("Enter new password: ", true)
 			if err != nil {
 				return err
@@ -133,4 +158,8 @@ func init() {
 	rekeyCmd.Flags().BoolVar(&rekeyForce, "force", false, "overwrite existing output file without prompting")
 	rekeyCmd.Flags().BoolVar(&keychainFlag, "keychain", false, "read current password from system keychain")
 	rekeyCmd.Flags().BoolVar(&saveKeychain, "save-keychain", false, "save new password to system keychain")
+	rekeyCmd.Flags().StringVar(&rekeyPasswordEnv, "password-env", "", "read current password from environment variable")
+	rekeyCmd.Flags().StringVar(&rekeyPasswordFD, "password-fd", "", "read current password from file descriptor number (e.g. 0 for stdin pipe)")
+	rekeyCmd.Flags().StringVar(&rekeyNewPasswordEnv, "new-password-env", "", "read new password from environment variable")
+	rekeyCmd.Flags().StringVar(&rekeyNewPasswordFD, "new-password-fd", "", "read new password from file descriptor number (e.g. 0 for stdin pipe)")
 }

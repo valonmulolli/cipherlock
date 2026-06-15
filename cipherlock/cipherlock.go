@@ -6,6 +6,7 @@ import (
 	"crypto/cipher"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"io"
 
 	"golang.org/x/crypto/argon2"
@@ -89,6 +90,8 @@ func DecryptWithMeta(dst io.Writer, src io.Reader, password []byte) (*FileMeta, 
 		multiSrc := io.MultiReader(bytes.NewReader(prefixFor(5)), src)
 		meta, streamErr := DecryptStreamMultiFromReader(dst, multiSrc, password)
 		return meta, streamErr
+	case formatVersionAsymmetric:
+		return nil, errors.New("cipherlock: file uses asymmetric encryption; use DecryptAsymmetric with an identity")
 	default:
 		return nil, ErrVersionMismatch
 	}

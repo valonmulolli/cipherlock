@@ -44,7 +44,7 @@ func TestBatchEncryptDecrypt(t *testing.T) {
 			t.Fatal(err)
 		}
 		dest := filepath.Join(encDir, info.Name()+".encrypted")
-		if err := encryptFile(src, dest, info, [][]byte{testPassword}, cfg); err != nil {
+		if err := encryptFile(src, dest, info, [][]byte{testPassword}, nil, cfg); err != nil {
 			t.Fatalf("encrypt %d: %v", i, err)
 		}
 	}
