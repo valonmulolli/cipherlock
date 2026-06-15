@@ -119,7 +119,16 @@ Change the password on an encrypted file without decrypting to disk:
 
     cipherlock rekey document.pdf.encrypted
 
-Prompts for the old and new passwords. Supports `--key-file`, `--new-key-file`, `--output`, and `--in-place` flags.
+Prompts for the old and new passwords. All scripting-friendly flags are supported for both the old and new passwords:
+
+| Flag                                    | Old password       | New password      |
+| --------------------------------------- | ------------------ | ----------------- |
+| `--key-file` / `--new-key-file`         | Read from file     | Read from file    |
+| `--password-env` / `--new-password-env` | Read from env var  | Read from env var |
+| `--password-fd` / `--new-password-fd`   | Read from fd       | Read from fd      |
+| `--keychain` / `--save-keychain`        | Read from keychain | Save to keychain  |
+
+Additional flags: `--output`, `--in-place`, `--force` (overwrite without prompt).
 
 ### Generate X25519 key pair
 
@@ -157,6 +166,15 @@ Useful in CI/CD pipelines where interactive prompts are unavailable.
 
 File descriptor 0 is stdin. Also works for decrypt and rekey.
 
+### System keychain
+
+    cipherlock encrypt --keychain document.pdf
+    cipherlock encrypt --save-keychain --keychain document.pdf
+
+`--keychain` reads the password from the system keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager). `--save-keychain` stores the password after a successful operation. The file path is used as the keychain account name.
+
+Also works for decrypt and rekey.
+
 ### Parallel batch processing
 
 Encrypt or decrypt multiple files concurrently:
@@ -165,6 +183,33 @@ Encrypt or decrypt multiple files concurrently:
     cipherlock decrypt --jobs 4 file1.txt.encrypted file2.txt.encrypted
 
 Controls how many files are processed simultaneously. Defaults to sequential (1 job).
+
+The `--out-dir` flag controls where batch output goes:
+
+    cipherlock encrypt --out-dir ./encrypted --jobs 4 file1.txt file2.txt
+    cipherlock decrypt --out-dir ./restored --jobs 4 file1.txt.encrypted
+
+### Securely shred files
+
+    cipherlock shred sensitive.pdf secret.tmp
+
+Overwrites each file with one pass of random data and one pass of zeros, then removes it. Supports multiple paths in one command. Combine with `--quiet` to suppress progress.
+
+### Inspect encrypted file metadata
+
+    cipherlock info document.pdf.encrypted
+
+Displays the format version, whether the file is encrypted, and any cleartext metadata. For v0x06/v0x07 files with encrypted metadata:
+
+    cipherlock info --password "my-secret" document.pdf.encrypted
+
+Reveals the original filename, size, and modification time.
+
+### Print version
+
+    cipherlock version
+
+Prints the cipherlock version (set at build time via `-ldflags`).
 
 ### Verify checksum
 
@@ -277,7 +322,7 @@ if errors.Is(err, cipherlock.ErrEncryptedMeta) {
 }
 ```
 
-Available sentinel errors: `ErrInvalidFormat`, `ErrVersionMismatch`, `ErrAuthFailed`, `ErrChecksumMismatch`, `ErrCorrupted`, `ErrAtLeastOnePassword`, `ErrEncryptedMeta`, `ErrNotArmored`, `ErrUnsupportedIdentity`, `ErrIdentityNeedsPassphrase`.
+Available sentinel errors: `ErrInvalidFormat`, `ErrVersionMismatch`, `ErrAuthFailed`, `ErrChecksumMismatch`, `ErrCorrupted`, `ErrAtLeastOnePassword`, `ErrEncryptedMeta`, `ErrNotArmored`, `ErrUnsupportedIdentity`, `ErrIdentityNeedsPassphrase`, `ErrV05MetaUnsupported`, `ErrConfigInvalid`.
 
 ### Read file metadata without decrypting
 
@@ -320,10 +365,15 @@ config := &cipherlock.Config{
     Threads: 8,
     KeyLen:  32,
 }
+if err := config.Validate(); err != nil {
+    // returns ErrConfigInvalid wrapping a descriptive message
+}
 err := cipherlock.Encrypt(dst, src, password, config)
 ```
 
 Setting `nil` uses `cipherlock.DefaultConfig` (time=3, memory=64MB, threads=4).
+
+`Config.Validate()` checks fields against defensive bounds: `SaltLen` (8-1024), `KeyLen` (16-64), `Time` (1-60), `Memory` (1-262144 KiB), `Threads` (1-32), `ChunkSize` (1-16MB).
 
 ### Check if a file is encrypted
 
@@ -375,6 +425,37 @@ err := cipherlock.DecryptFileV1("old_file.encrypted", "old_file", password)
 ```go
 err := cipherlock.ReKeyFile("old.encrypted", "new.encrypted", oldPassword, newPassword, nil)
 ```
+
+For stream-based rekeying without file paths:
+
+```go
+var buf bytes.Buffer
+err := cipherlock.ReKey(&buf, oldFile, oldPassword, newPassword, nil)
+```
+
+### Asymmetric encryption (X25519)
+
+```go
+privKey := make([]byte, 32) // 32-byte private key seed
+identity, _ := cipherlock.X25519IdentityFromPrivateKey(privKey)
+// identity.PublicKey is the corresponding 32-byte public key
+
+recipient, _ := cipherlock.NewX25519Recipient(identity.PublicKey)
+
+var encrypted bytes.Buffer
+err := cipherlock.EncryptAsymmetric(&encrypted, someReader, []*cipherlock.X25519Recipient{recipient}, nil)
+```
+
+EncryptAsymmetric accepts one or more recipients. The data is encrypted with a random file key, and the file key is sealed once per recipient using ECDH + HKDF + AES-256-GCM.
+
+### Asymmetric decryption
+
+```go
+var decrypted bytes.Buffer
+err := cipherlock.DecryptAsymmetric(&decrypted, encryptedReader, identity)
+```
+
+The identity is matched against each recipient entry in the v0x08 header. Key exchange uses the ephemeral public key stored in the header.
 
 ### Multi-recipient encryption
 
@@ -644,6 +725,22 @@ After successful replacement, the original file is securely shredded (overwritte
 ### V1 format caveat
 
 The original file-encryption tool used PBKDF2 with only 4096 iterations and SHA-1. Files created with that tool remain decryptable via cipherlock, but re-encrypt them with the V2 format to get Argon2id protection.
+
+### Defensive bounds (OOM prevention)
+
+Every header field is validated against strict upper limits before allocation. This prevents a maliciously crafted file from triggering out-of-memory conditions during decryption:
+
+| Constant                  | Value      | Purpose                              |
+| ------------------------- | ---------- | ------------------------------------ |
+| `maxSaltLen`              | 1024 bytes | Salt length                          |
+| `maxKeyLen`               | 64 bytes   | Derived key length                   |
+| `maxChunkSize`            | 16 MB      | Per-chunk ciphertext length          |
+| `maxV04Body`              | 1 GiB      | v0x04 single-blob body               |
+| `maxMemory`               | 256 MiB    | Argon2id memory parameter            |
+| `maxTime`                 | 60         | Argon2id time parameter              |
+| `maxThreads`              | 32         | Argon2id threads                     |
+| `maxRecipients`           | 16         | Password-based multi-recipient count |
+| `maxAsymmetricRecipients` | 64         | X25519 asymmetric recipient count    |
 
 ## Threat model
 
