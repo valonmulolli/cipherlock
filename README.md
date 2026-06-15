@@ -536,7 +536,7 @@ files it returns `cipherlock.ErrEncryptedMeta`.
 
 ## File format
 
-cipherlock uses a self-describing binary format with versioned headers (v0x02–v0x08). Detailed wire-level specifications for each version (V2/V3 through V8) and the ASCII-armor format are documented in [docs/FORMAT.md](docs/FORMAT.md).
+cipherlock uses a self-describing binary format with versioned headers (v0x02–v0x08). Wire-level specifications for each version and the ASCII-armor format are documented in the [package documentation](https://pkg.go.dev/github.com/valonmulolli/cipherlock/cipherlock).
 
 ## Security
 
