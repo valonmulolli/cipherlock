@@ -322,9 +322,7 @@ if errors.Is(err, cipherlock.ErrEncryptedMeta) {
 }
 ```
 
-Available sentinel errors: `ErrInvalidFormat`, `ErrVersionMismatch`, `ErrAuthFailed`, `ErrChecksumMismatch`, `ErrCorrupted`, `ErrAtLeastOnePassword`, `ErrEncryptedMeta`, `ErrNotArmored`, `ErrUnsupportedIdentity`, `ErrIdentityNeedsPassphrase`, `ErrV05MetaUnsupported`, `ErrConfigInvalid`.
-
-`ErrV05MetaUnsupported` is retained as a sentinel for programmatic checks — `EncryptStream` no longer returns it, having been changed to auto-upgrade to v0x06 when FileMeta is set.
+Available sentinel errors: `ErrInvalidFormat`, `ErrVersionMismatch`, `ErrAuthFailed`, `ErrChecksumMismatch`, `ErrCorrupted`, `ErrAtLeastOnePassword`, `ErrEncryptedMeta`, `ErrNotArmored`, `ErrUnsupportedIdentity`, `ErrIdentityNeedsPassphrase`, `ErrConfigInvalid`.
 
 ### Read file metadata without decrypting
 

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -15,7 +16,7 @@ func readPasswordFromEnv(envVar string) ([]byte, error) {
 	if v == "" {
 		return nil, fmt.Errorf("environment variable %q is empty or not set", envVar)
 	}
-	return []byte(v), nil
+	return []byte(strings.TrimRight(v, "\n\r")), nil
 }
 
 func readPasswordFromFD(fdStr string) ([]byte, error) {
@@ -31,7 +32,9 @@ func readPasswordFromFD(fdStr string) ([]byte, error) {
 	if f == nil {
 		return nil, fmt.Errorf("invalid file descriptor: %d", fdNum)
 	}
-	defer f.Close()
+	if fdNum > 2 {
+		defer f.Close()
+	}
 
 	data, err := io.ReadAll(f)
 	if err != nil {
@@ -73,7 +76,7 @@ func resolvePassword(src passwordSource) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("reading key file: %w", err)
 		}
-		return pwd, nil
+		return bytes.TrimRight(pwd, "\n\r"), nil
 	case src.GenPwd:
 		pwd, err := generatePassword(32)
 		if err != nil {

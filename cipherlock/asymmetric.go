@@ -385,11 +385,11 @@ func DecryptAsymmetric(dst io.Writer, src io.Reader, identity *X25519Identity) e
 		return errors.New("cipherlock: identity is required for asymmetric decryption")
 	}
 
-	var magic [4]byte
-	if _, err := io.ReadFull(src, magic[:]); err != nil {
+	var hdrMagic [4]byte
+	if _, err := io.ReadFull(src, hdrMagic[:]); err != nil {
 		return ErrInvalidFormat
 	}
-	if magic != [4]byte{'C', 'V', '2', 0} {
+	if hdrMagic != magic {
 		return ErrInvalidFormat
 	}
 
@@ -568,7 +568,7 @@ func DeserializeX25519Identity(data, passphrase []byte) (*X25519Identity, error)
 		if len(passphrase) == 0 {
 			return nil, ErrIdentityNeedsPassphrase
 		}
-		if len(payload) < 1+identitySaltLen+12+1 {
+		if len(payload) < 1+identitySaltLen+12+16 {
 			return nil, ErrCorrupted
 		}
 

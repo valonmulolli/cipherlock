@@ -222,8 +222,7 @@ func DecryptWithMetaContext(ctx context.Context, dst io.Writer, src io.Reader, p
 }
 
 // DecryptStreamMultiContext is a context-aware wrapper around the v0x07 streaming
-// multi-recipient decrypt path. The meta argument is unused and kept for symmetry
-// with other DecryptContext variants; metadata is always returned via
+// multi-recipient decrypt path. Metadata is always returned via
 // ReadStreamMetaWithPassword when needed.
 //
 // NOTE: Context cancellation does not interrupt an in-progress Argon2id key

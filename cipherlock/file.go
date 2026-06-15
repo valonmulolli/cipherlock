@@ -13,8 +13,7 @@ import (
 // The output format is v0x05 (streaming) by default. When config.FileMeta
 // is set the output is v0x06 so the metadata chunk is encrypted (v0x05
 // would leak the original filename and mtime in the cleartext header).
-// EncryptFile explicitly selects EncryptStreamV2 in that case; it never
-// returns ErrV05MetaUnsupported.
+// EncryptFile explicitly selects EncryptStreamV2 in that case.
 //
 // It returns errors from os.Open/os.Create, or any error returned by
 // Encrypt or EncryptStreamV2 (see those functions for details).

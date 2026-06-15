@@ -102,33 +102,39 @@ func readStreamMultiHeader(r io.Reader) (streamMultiHeader, error) {
 		return h, ErrCorrupted
 	}
 
-	h.Recipients = make([]recipientEntry, numRecipients)
-	var err error
-	for i := range h.Recipients {
-		e := &h.Recipients[i]
+	entries, err := readRecipientEntries(r, numRecipients)
+	if err != nil {
+		return h, err
+	}
+	h.Recipients = entries
+	return h, nil
+}
 
+func readRecipientEntries(r io.Reader, num uint32) ([]recipientEntry, error) {
+	entries := make([]recipientEntry, num)
+	var err error
+	for i := range entries {
+		e := &entries[i]
 		e.Salt, e.Time, e.Memory, e.Threads, e.KeyLen, err = readArgon2Params(r)
 		if err != nil {
-			return h, err
+			return nil, err
 		}
 		if _, err := io.ReadFull(r, e.KeyNonce[:]); err != nil {
-			return h, ErrInvalidFormat
+			return nil, ErrInvalidFormat
 		}
-
 		var keyLen uint16
-		if err := read(&keyLen); err != nil {
-			return h, ErrInvalidFormat
+		if err := binary.Read(r, binary.LittleEndian, &keyLen); err != nil {
+			return nil, ErrInvalidFormat
 		}
 		if keyLen == 0 || int(keyLen) > int(e.KeyLen)+16 {
-			return h, ErrCorrupted
+			return nil, ErrCorrupted
 		}
 		e.SealedKey = make([]byte, keyLen)
 		if _, err := io.ReadFull(r, e.SealedKey); err != nil {
-			return h, ErrInvalidFormat
+			return nil, ErrInvalidFormat
 		}
 	}
-
-	return h, nil
+	return entries, nil
 }
 
 // unsealFileKey iterates over recipient entries and returns the first file key that
@@ -466,31 +472,11 @@ func readStreamMultiMeta(r io.Reader, password []byte) (*FileMeta, error) {
 		return nil, ErrCorrupted
 	}
 
-	h.Recipients = make([]recipientEntry, numRecipients)
-	var err error
-	for i := range h.Recipients {
-		e := &h.Recipients[i]
-
-		e.Salt, e.Time, e.Memory, e.Threads, e.KeyLen, err = readArgon2Params(r)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := io.ReadFull(r, e.KeyNonce[:]); err != nil {
-			return nil, ErrInvalidFormat
-		}
-
-		var keyLen uint16
-		if err := read(&keyLen); err != nil {
-			return nil, ErrInvalidFormat
-		}
-		if keyLen == 0 || int(keyLen) > int(e.KeyLen)+16 {
-			return nil, ErrCorrupted
-		}
-		e.SealedKey = make([]byte, keyLen)
-		if _, err := io.ReadFull(r, e.SealedKey); err != nil {
-			return nil, ErrInvalidFormat
-		}
+	entries, err := readRecipientEntries(r, numRecipients)
+	if err != nil {
+		return nil, err
 	}
+	h.Recipients = entries
 
 	if h.Flags&flagHasMetadata == 0 {
 		return nil, nil

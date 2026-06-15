@@ -86,7 +86,6 @@ plaintext to stdout.`,
 				return fmt.Errorf("--dir cannot be used with --identity")
 			}
 
-			var destPaths []string
 			for _, src := range args {
 				if src == "-" {
 					err := decryptAsymmetricFromReader(os.Stdout, os.Stdin, identity)
@@ -99,10 +98,6 @@ plaintext to stdout.`,
 				}
 
 				if checkOnly {
-					info, err := os.Stat(src)
-					if err != nil {
-						return err
-					}
 					srcFile, err := os.Open(src)
 					if err != nil {
 						return err
@@ -148,9 +143,7 @@ plaintext to stdout.`,
 					}
 					return err
 				}
-				destPaths = append(destPaths, dest)
 			}
-			_ = destPaths
 			return nil
 		}
 

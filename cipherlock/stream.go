@@ -314,65 +314,10 @@ func ReadStreamMeta(src io.Reader) (*FileMeta, error) {
 	case formatVersionStreamV2, formatVersionStreamMulti:
 		return nil, ErrEncryptedMeta
 	case formatVersionStream:
-		// fall through
+		return readStreamV05Body(src)
 	default:
 		return nil, nil
 	}
-
-	if _, err := io.CopyN(io.Discard, src, 1); err != nil {
-		return nil, ErrInvalidFormat
-	}
-
-	var saltLen uint16
-	if err := binary.Read(src, binary.LittleEndian, &saltLen); err != nil {
-		return nil, ErrInvalidFormat
-	}
-	if saltLen > maxSaltLen {
-		return nil, ErrCorrupted
-	}
-
-	salt := make([]byte, saltLen)
-	if _, err := io.ReadFull(src, salt); err != nil {
-		return nil, ErrInvalidFormat
-	}
-
-	// Skip Argon2 parameters (Time=4, Memory=4, Threads=1, KeyLen=4, ChunkSize=4)
-	if _, err := io.CopyN(io.Discard, src, 17); err != nil {
-		return nil, ErrInvalidFormat
-	}
-
-	var hasMeta byte
-	if err := binary.Read(src, binary.LittleEndian, &hasMeta); err != nil {
-		return nil, ErrInvalidFormat
-	}
-	if hasMeta == 0 {
-		return nil, nil
-	}
-
-	var nameLen uint16
-	if err := binary.Read(src, binary.LittleEndian, &nameLen); err != nil {
-		return nil, ErrInvalidFormat
-	}
-	nameBytes := make([]byte, nameLen)
-	if _, err := io.ReadFull(src, nameBytes); err != nil {
-		return nil, ErrInvalidFormat
-	}
-
-	var size int64
-	if err := binary.Read(src, binary.LittleEndian, &size); err != nil {
-		return nil, ErrInvalidFormat
-	}
-
-	var modNano int64
-	if err := binary.Read(src, binary.LittleEndian, &modNano); err != nil {
-		return nil, ErrInvalidFormat
-	}
-
-	return &FileMeta{
-		Name:    string(nameBytes),
-		Size:    size,
-		ModTime: time.Unix(0, modNano),
-	}, nil
 }
 
 // ReadStreamMetaWithPassword reads the FileMeta from any stream-format cipherlock header
@@ -397,7 +342,7 @@ func ReadStreamMetaWithPassword(src io.Reader, password []byte) (*FileMeta, erro
 
 	switch version {
 	case formatVersionStream:
-		return readStreamV05Meta(src)
+		return readStreamV05Body(src)
 	case formatVersionStreamV2:
 		return readStreamV2MetaOnly(src, password)
 	case formatVersionStreamMulti:
@@ -407,9 +352,9 @@ func ReadStreamMetaWithPassword(src io.Reader, password []byte) (*FileMeta, erro
 	}
 }
 
-// readStreamV05Meta parses the cleartext metadata fields from a v0x05 header.
+// readStreamV05Body parses the cleartext metadata fields from a v0x05 header body.
 // The version byte has already been consumed; src starts at the flags byte.
-func readStreamV05Meta(src io.Reader) (*FileMeta, error) {
+func readStreamV05Body(src io.Reader) (*FileMeta, error) {
 	if _, err := io.CopyN(io.Discard, src, 1); err != nil {
 		return nil, ErrInvalidFormat
 	}
