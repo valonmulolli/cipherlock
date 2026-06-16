@@ -72,6 +72,7 @@ the file has been corrupted or the password is wrong.`,
 		}
 
 		fmt.Fprintln(os.Stderr, "integrity verified, file is intact")
+		quietStatus("verified", nil)
 		return nil
 	},
 }

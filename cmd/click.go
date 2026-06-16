@@ -68,6 +68,7 @@ This is the same as 'decrypt --check'.`,
 		}
 
 		fmt.Fprintln(os.Stderr, "password correct, file is intact")
+		quietStatus("verified", nil)
 		return nil
 	},
 }

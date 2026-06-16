@@ -310,7 +310,8 @@ func encryptStdin(passwords [][]byte, asymmetricRecipients []*cipherlock.X25519R
 	return err
 }
 
-func encryptFile(srcPath, dstPath string, info os.FileInfo, passwords [][]byte, asymmetricRecipients []*cipherlock.X25519Recipient, config *cipherlock.Config) error {
+func encryptFile(srcPath, dstPath string, info os.FileInfo, passwords [][]byte, asymmetricRecipients []*cipherlock.X25519Recipient, config *cipherlock.Config) (err error) {
+	defer func() { quietStatus("encrypted", err) }()
 	if info == nil {
 		var err error
 		info, err = os.Stat(srcPath)

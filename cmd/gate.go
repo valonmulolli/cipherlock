@@ -89,6 +89,7 @@ Attempting to decrypt after the expiration will fail.`,
 		stopKDF := showKDF()
 		err = cipherlock.EncryptFile(srcPath, dest, password, config)
 		stopKDF()
+		quietStatus("gate encrypted", err)
 		return err
 	},
 }
@@ -145,6 +146,7 @@ the decryption will fail.`,
 			}
 		}
 
+		quietStatus("gate decrypted", nil)
 		return nil
 	},
 }

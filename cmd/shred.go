@@ -33,6 +33,7 @@ tools on spinning disks. On SSDs, wear-leveling may leave remnants.`,
 			if err := cipherlock.Shred(path); err != nil {
 				return fmt.Errorf("shred %s: %w", path, err)
 			}
+			quietStatus("shredded", nil)
 		}
 		return nil
 	},

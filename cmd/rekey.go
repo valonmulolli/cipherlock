@@ -83,6 +83,7 @@ write to a different path (the original is preserved).`,
 
 		if dryRun {
 			fmt.Fprintf(os.Stderr, "would rekey %s -> %s\n", source, dest)
+			quietStatus("rekeyed", nil)
 			return nil
 		}
 
@@ -138,6 +139,7 @@ write to a different path (the original is preserved).`,
 			_ = keychainSet(getKeychainAccount(source), string(newPwd))
 		}
 
+		quietStatus("rekeyed", nil)
 		return nil
 	},
 }

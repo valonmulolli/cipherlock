@@ -362,7 +362,8 @@ func decryptDirSource(srcPath string, info os.FileInfo, password []byte) error {
 	return nil
 }
 
-func decryptFile(srcPath, dstPath string, info os.FileInfo, password []byte) error {
+func decryptFile(srcPath, dstPath string, info os.FileInfo, password []byte) (err error) {
+	defer func() { quietStatus("decrypted", err) }()
 	if inPlace {
 		if backup {
 			if err := copyFile(srcPath, srcPath+".bak"); err != nil {
@@ -493,7 +494,8 @@ func decryptAsymmetricFromReader(w io.Writer, r io.Reader, identity *cipherlock.
 	return cipherlock.DecryptAsymmetric(w, reader, identity)
 }
 
-func decryptAsymmetricFile(dstPath string, srcPath string, info os.FileInfo, identity *cipherlock.X25519Identity) error {
+func decryptAsymmetricFile(dstPath string, srcPath string, info os.FileInfo, identity *cipherlock.X25519Identity) (err error) {
+	defer func() { quietStatus("decrypted", err) }()
 	srcFile, err := os.Open(srcPath)
 	if err != nil {
 		return err

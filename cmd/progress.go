@@ -11,6 +11,17 @@ import (
 
 const scrambleChars = "0123456789abcdefABCDEF~!@#$£€%^&*()+=_"
 
+func quietStatus(label string, err error) {
+	if !quiet.Load() {
+		return
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "\r%s failed\n", label)
+	} else {
+		fmt.Fprintf(os.Stderr, "\r%s done\n", label)
+	}
+}
+
 func showKDF() func() {
 	if quiet.Load() {
 		return func() {}
