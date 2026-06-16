@@ -5,14 +5,16 @@ import (
 	"os"
 )
 
+type ShredProgressFn func(pass, totalPasses int, bytesWritten, fileSize int64)
+
 // Shred securely overwrites a file with random data followed by zeros, then removes it.
-// Each pass is fsynced before the next step to flush page cache.
-// This helps prevent recovery of sensitive data from disk.
-//
-// Note: Shred is best-effort. Copy-on-write filesystems (btrfs, ZFS), flash
-// translation layers on SSDs, and wear-leveling NAND may retain stale copies
-// of the overwritten data despite the sync.
 func Shred(path string) error {
+	return ShredWith(path, nil)
+}
+
+// ShredWith is like Shred but calls fn after each write to report progress.
+// fn may be nil.
+func ShredWith(path string, fn ShredProgressFn) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		return err
@@ -22,6 +24,8 @@ func Shred(path string) error {
 	if size == 0 {
 		return os.Remove(path)
 	}
+
+	totalPasses := 2
 
 	f, err := os.OpenFile(path, os.O_WRONLY, 0)
 	if err != nil {
@@ -44,6 +48,9 @@ func Shred(path string) error {
 			return err
 		}
 		remaining -= writeLen
+		if fn != nil {
+			fn(1, totalPasses, size-remaining, size)
+		}
 	}
 
 	if err := f.Sync(); err != nil {
@@ -70,6 +77,9 @@ func Shred(path string) error {
 			return err
 		}
 		remaining -= writeLen
+		if fn != nil {
+			fn(2, totalPasses, size-remaining, size)
+		}
 	}
 
 	if err := f.Sync(); err != nil {

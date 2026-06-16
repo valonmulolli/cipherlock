@@ -9,7 +9,10 @@ import (
 	"unicode/utf8"
 )
 
-const scrambleChars = "0123456789abcdefABCDEF~!@#$£€%^&*()+=_"
+const (
+	scrambleChars = "0123456789abcdefABCDEF~!@#$£€%^&*()+=_"
+	barWidth      = 30
+)
 
 func quietStatus(label string, err error) {
 	if !quiet.Load() {
@@ -95,8 +98,6 @@ type progressBarReader struct {
 	label       string
 	start       time.Time
 	last        time.Time
-	barWidth    int
-	done        bool
 	firstRender bool
 }
 
@@ -110,7 +111,6 @@ func progressReader(r io.Reader, size int64, label string) io.Reader {
 		label:       label,
 		start:       time.Now(),
 		last:        time.Now(),
-		barWidth:    30,
 		firstRender: true,
 	}
 }
@@ -133,7 +133,7 @@ func (p *progressBarReader) render() {
 		elapsed = 0.01
 	}
 	pct := float64(p.read) / float64(p.total)
-	filled := int(math.Round(pct * float64(p.barWidth)))
+	filled := int(math.Round(pct * float64(barWidth)))
 
 	textColor := resolveColor(color2)
 	filledColor := resolveColor(color4)
@@ -141,7 +141,7 @@ func (p *progressBarReader) render() {
 	reset := ansiReset()
 
 	bar := ""
-	for i := 0; i < p.barWidth; i++ {
+	for i := 0; i < barWidth; i++ {
 		if i < filled {
 			bar += filledColor + "▌"
 		} else {
