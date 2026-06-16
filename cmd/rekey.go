@@ -113,13 +113,19 @@ write to a different path (the original is preserved).`,
 			}
 			defer srcFile.Close()
 
+			info, err := srcFile.Stat()
+			if err != nil {
+				stopKDF()
+				return err
+			}
+
 			destFile, err := os.Create(dest)
 			if err != nil {
 				stopKDF()
 				return err
 			}
 
-			err = cipherlock.ReKey(destFile, srcFile, oldPwd, newPwd, nil)
+			err = cipherlock.ReKey(destFile, progressReader(srcFile, info.Size(), "rotoring"), oldPwd, newPwd, nil)
 			closeErr := destFile.Close()
 			stopKDF()
 			if err != nil {

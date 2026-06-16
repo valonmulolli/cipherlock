@@ -2,3 +2,6 @@
 *.encrypted
 *.decrypted
 *.cipherlock
+*.identity
+*.pub
+/cipherlock/cipherlock
