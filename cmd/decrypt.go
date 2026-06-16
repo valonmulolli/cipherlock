@@ -365,62 +365,28 @@ func decryptDirSource(srcPath string, info os.FileInfo, password []byte) error {
 func decryptFile(srcPath, dstPath string, info os.FileInfo, password []byte) (err error) {
 	defer func() { quietStatus("decrypted", err) }()
 	if inPlace {
-		if backup {
-			if err := copyFile(srcPath, srcPath+".bak"); err != nil {
+		return inPlaceWrite(srcPath, keep, func(tmp, bak string) error {
+			srcFile, err := os.Open(bak)
+			if err != nil {
 				return err
 			}
-		}
+			defer srcFile.Close()
 
-		bak := srcPath + ".cipherlock-bak"
-		if err := os.Rename(srcPath, bak); err != nil {
-			return err
-		}
+			destFile, err := os.Create(tmp)
+			if err != nil {
+				return err
+			}
+			defer destFile.Close()
 
-		tmp := srcPath + ".tmp"
-		trackTempFile(tmp)
-		destFile, err := os.Create(tmp)
-		if err != nil {
-			os.Rename(bak, srcPath)
-			return err
-		}
-
-		srcFile, err := os.Open(bak)
-		if err != nil {
-			destFile.Close()
-			os.Remove(tmp)
-			untrackTempFile(tmp)
-			os.Rename(bak, srcPath)
-			return err
-		}
-
-		srcReader := progressReader(srcFile, info.Size(), "decrypting")
-		stopKDF := showKDF()
-
-		err = decryptFromReader(destFile, srcReader, password)
-		srcFile.Close()
-		destFile.Close()
-		stopKDF()
-		if err != nil {
-			os.Remove(tmp)
-			untrackTempFile(tmp)
-			os.Rename(bak, srcPath) // restore original
+			srcReader := progressReader(srcFile, info.Size(), "decrypting")
+			stopKDF := showKDF()
+			err = decryptFromReader(destFile, srcReader, password)
+			stopKDF()
 			if isAuthError(err) {
 				return errors.New("decryption failed: wrong password or corrupted data")
 			}
 			return err
-		}
-
-		if err := os.Rename(tmp, srcPath); err != nil {
-			return err
-		}
-		untrackTempFile(tmp)
-
-		if keep {
-			_ = os.Rename(bak, srcPath+".bak")
-		} else {
-			_ = cipherlock.Shred(bak)
-		}
-		return nil
+		})
 	}
 
 	destFile, err := os.Create(dstPath)
@@ -510,63 +476,29 @@ func decryptAsymmetricFile(dstPath string, srcPath string, info os.FileInfo, ide
 	}
 
 	if inPlace {
-		if backup {
-			if err := copyFile(srcPath, srcPath+".bak"); err != nil {
+		srcFile.Close()
+		return inPlaceWrite(srcPath, keep, func(tmp, bak string) error {
+			bakFile, err := os.Open(bak)
+			if err != nil {
 				return err
 			}
-		}
+			defer bakFile.Close()
 
-		bak := srcPath + ".cipherlock-bak"
-		if err := os.Rename(srcPath, bak); err != nil {
-			return err
-		}
+			destFile, err := os.Create(tmp)
+			if err != nil {
+				return err
+			}
+			defer destFile.Close()
 
-		tmp := srcPath + ".tmp"
-		trackTempFile(tmp)
-		destFile, err := os.Create(tmp)
-		if err != nil {
-			os.Rename(bak, srcPath)
-			return err
-		}
+			var bakReader io.Reader
+			if info.Size() > 0 && info.Mode().IsRegular() {
+				bakReader = progressReader(bakFile, info.Size(), "decrypting")
+			} else {
+				bakReader = bakFile
+			}
 
-		srcFile.Close()
-		bakFile, err := os.Open(bak)
-		if err != nil {
-			destFile.Close()
-			os.Remove(tmp)
-			untrackTempFile(tmp)
-			os.Rename(bak, srcPath)
-			return err
-		}
-
-		var bakReader io.Reader
-		if info.Size() > 0 && info.Mode().IsRegular() {
-			bakReader = progressReader(bakFile, info.Size(), "decrypting")
-		} else {
-			bakReader = bakFile
-		}
-
-		err = decryptAsymmetricFromReader(destFile, bakReader, identity)
-		bakFile.Close()
-		destFile.Close()
-		if err != nil {
-			os.Remove(tmp)
-			untrackTempFile(tmp)
-			os.Rename(bak, srcPath)
-			return err
-		}
-
-		if err := os.Rename(tmp, srcPath); err != nil {
-			return err
-		}
-		untrackTempFile(tmp)
-
-		if keep {
-			_ = os.Rename(bak, srcPath+".bak")
-		} else {
-			_ = cipherlock.Shred(bak)
-		}
-		return nil
+			return decryptAsymmetricFromReader(destFile, bakReader, identity)
+		})
 	}
 
 	destFile, err := os.Create(dstPath)

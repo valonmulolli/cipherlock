@@ -333,57 +333,22 @@ func encryptFile(srcPath, dstPath string, info os.FileInfo, passwords [][]byte, 
 	}
 
 	if inPlace {
-		if backup {
-			if err := copyFile(srcPath, srcPath+".bak"); err != nil {
+		srcReader := progressReader(srcFile, info.Size(), "encrypting")
+
+		err := inPlaceWrite(srcPath, keep, func(tmp, _ string) error {
+			destFile, err := os.Create(tmp)
+			if err != nil {
 				return err
 			}
-		}
+			defer destFile.Close()
 
-		// Rename original to a safe backup before we write anything.
-		// srcFile's fd still points to the same inode (now at bak),
-		// so reads continue to work. If SIGINT hits here, the user's
-		// original is preserved as .cipherlock-bak.
-		bak := srcPath + ".cipherlock-bak"
-		if err := os.Rename(srcPath, bak); err != nil {
+			stopKDF := showKDF()
+			err = encryptToWriter(destFile, srcReader, passwords, asymmetricRecipients, &cfg)
+			stopKDF()
 			return err
-		}
-
-		tmp := srcPath + ".tmp"
-		trackTempFile(tmp)
-		destFile, err := os.Create(tmp)
-		if err != nil {
-			os.Rename(bak, srcPath)
-			srcFile.Close()
-			return err
-		}
-
-		srcReader := progressReader(srcFile, info.Size(), "encrypting")
-		stopKDF := showKDF()
-
-		err = encryptToWriter(destFile, srcReader, passwords, asymmetricRecipients, &cfg)
-		destFile.Close()
-		stopKDF()
-		if err != nil {
-			os.Remove(tmp)
-			untrackTempFile(tmp)
-			os.Rename(bak, srcPath) // restore original
-			srcFile.Close()
-			return err
-		}
-
+		})
 		srcFile.Close()
-
-		if err := os.Rename(tmp, srcPath); err != nil {
-			return err
-		}
-		untrackTempFile(tmp)
-
-		if keep {
-			_ = os.Rename(bak, srcPath+".bak")
-		} else {
-			_ = cipherlock.Shred(bak)
-		}
-		return nil
+		return err
 	}
 
 	defer srcFile.Close()

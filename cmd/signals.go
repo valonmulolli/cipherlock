@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
+
+	"github.com/valonmulolli/cipherlock/cipherlock"
 )
 
 var (
@@ -46,4 +49,47 @@ func init() {
 		cleanupTempFiles()
 		os.Exit(1)
 	}()
+}
+
+// inPlaceWrite performs an in-place write that is SIGINT-safe.
+// It renames original to .cipherlock-bak, creates a temp file, calls writeFn
+// with the temp file and bak paths, and on success renames temp over the original.
+// If the operation fails, the original is restored from the backup.
+// keepBak controls whether .cipherlock-bak is preserved or shredded.
+func inPlaceWrite(srcPath string, keepBak bool, writeFn func(tmpPath, bakPath string) error) error {
+	if backup {
+		if err := copyFile(srcPath, srcPath+".bak"); err != nil {
+			return err
+		}
+	}
+
+	bak := srcPath + ".cipherlock-bak"
+	if err := os.Rename(srcPath, bak); err != nil {
+		return fmt.Errorf("rename to backup: %w", err)
+	}
+
+	tmp := srcPath + ".tmp"
+	trackTempFile(tmp)
+
+	if err := writeFn(tmp, bak); err != nil {
+		os.Remove(tmp)
+		untrackTempFile(tmp)
+		os.Rename(bak, srcPath)
+		return err
+	}
+
+	if err := os.Rename(tmp, srcPath); err != nil {
+		os.Remove(tmp)
+		untrackTempFile(tmp)
+		os.Rename(bak, srcPath)
+		return err
+	}
+	untrackTempFile(tmp)
+
+	if keepBak {
+		_ = os.Rename(bak, srcPath+".bak")
+	} else {
+		_ = cipherlock.Shred(bak)
+	}
+	return nil
 }
