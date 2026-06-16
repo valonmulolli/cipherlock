@@ -102,7 +102,10 @@ func IsEncrypted(path string) (bool, error) {
 
 	var buf [4]byte
 	if _, err := io.ReadFull(f, buf[:]); err != nil {
-		return false, nil
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			return false, nil
+		}
+		return false, err
 	}
 	return buf == magic, nil
 }

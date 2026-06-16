@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"strings"
 	"unicode"
 )
 
@@ -45,7 +44,16 @@ var commonPasswords = map[string]bool{
 }
 
 func estimateStrength(pwd []byte) strength {
-	s := strings.ToLower(string(pwd))
+	lower := make([]byte, len(pwd))
+	for i, c := range pwd {
+		if c >= 'A' && c <= 'Z' {
+			lower[i] = c + 32
+		} else {
+			lower[i] = c
+		}
+	}
+	defer clear(lower)
+	s := string(lower)
 	runes := []rune(s)
 
 	if commonPasswords[s] {

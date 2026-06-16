@@ -221,6 +221,9 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 				}
 				return dest, nil
 			}, batchEncryptFunc(passwords, asymmetricRecipients, config), jobs)
+			if saveKeychain {
+				savePasswordsToKeychain(args, passwords)
+			}
 			return err
 		}
 
@@ -391,10 +394,12 @@ func encryptFile(srcPath, dstPath string, info os.FileInfo, passwords [][]byte, 
 	if err != nil {
 		return err
 	}
-	defer destFile.Close()
 
 	err = encryptToWriter(destFile, srcReader, passwords, asymmetricRecipients, &cfg)
 	stopKDF()
+	if closeErr := destFile.Close(); closeErr != nil && err == nil {
+		err = closeErr
+	}
 	return err
 }
 

@@ -117,15 +117,20 @@ write to a different path (the original is preserved).`,
 				stopKDF()
 				return err
 			}
-			defer destFile.Close()
 
 			err = cipherlock.ReKey(destFile, srcFile, oldPwd, newPwd, nil)
+			closeErr := destFile.Close()
 			stopKDF()
 			if err != nil {
+				os.Remove(dest)
 				if isAuthError(err) {
 					return errors.New("rekey failed: wrong password or corrupted data")
 				}
 				return err
+			}
+			if closeErr != nil {
+				os.Remove(dest)
+				return closeErr
 			}
 		}
 

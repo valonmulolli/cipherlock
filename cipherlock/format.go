@@ -120,7 +120,7 @@ func readArgon2Params(r io.Reader) (salt []byte, time uint32, memory uint32, thr
 	if err := binary.Read(r, binary.LittleEndian, &saltLen); err != nil {
 		return nil, 0, 0, 0, 0, ErrInvalidFormat
 	}
-	if saltLen > maxSaltLen {
+	if saltLen < 8 || saltLen > maxSaltLen {
 		return nil, 0, 0, 0, 0, ErrCorrupted
 	}
 	salt = make([]byte, saltLen)

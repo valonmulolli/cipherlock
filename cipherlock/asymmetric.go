@@ -249,10 +249,10 @@ func deriveWrappingKey(sharedSecret, ephemeralPub, recipientPub []byte) (key, no
 // The data is encrypted with a random file key using AES-256-GCM, and the file key
 // is sealed once per recipient. Each recipient can independently decrypt the file.
 //
-// It returns ErrAtLeastOnePassword if no recipients are provided.
+// It returns an error if no recipients are provided.
 func EncryptAsymmetric(dst io.Writer, src io.Reader, recipients []*X25519Recipient, config *Config) error {
 	if len(recipients) == 0 {
-		return ErrAtLeastOnePassword
+		return errors.New("cipherlock: at least one recipient required")
 	}
 
 	if config == nil {

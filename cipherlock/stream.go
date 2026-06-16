@@ -14,6 +14,8 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
+const maxMetaNameLen = 4096
+
 type streamHeader struct {
 	Salt      []byte
 	Time      uint32
@@ -382,6 +384,9 @@ func readStreamV05Body(src io.Reader) (*FileMeta, error) {
 	var nameLen uint16
 	if err := binary.Read(src, binary.LittleEndian, &nameLen); err != nil {
 		return nil, ErrInvalidFormat
+	}
+	if nameLen > maxMetaNameLen {
+		return nil, ErrCorrupted
 	}
 	nameBytes := make([]byte, nameLen)
 	if _, err := io.ReadFull(src, nameBytes); err != nil {

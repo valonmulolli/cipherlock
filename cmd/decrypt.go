@@ -225,6 +225,9 @@ plaintext to stdout.`,
 				}
 				return dest, nil
 			}, batchDecryptFunc(password, identity), jobs)
+			if saveKeychain && err == nil {
+				savePasswordsToKeychain(args, [][]byte{password})
+			}
 			return err
 		}
 
@@ -423,10 +426,10 @@ func decryptFile(srcPath, dstPath string, info os.FileInfo, password []byte) err
 	if err != nil {
 		return err
 	}
-	defer destFile.Close() //nolint:errcheck
 
 	srcFile, err := os.Open(srcPath)
 	if err != nil {
+		destFile.Close()
 		return err
 	}
 	defer srcFile.Close() //nolint:errcheck
@@ -440,12 +443,16 @@ func decryptFile(srcPath, dstPath string, info os.FileInfo, password []byte) err
 		err = decryptFromReader(destFile, srcReader, password)
 	}
 	stopKDF()
+	closeErr := destFile.Close()
 	if err != nil {
 		os.Remove(dstPath) //nolint:errcheck
 		if isAuthError(err) {
 			return errors.New("decryption failed: wrong password or corrupted data")
 		}
 		return err
+	}
+	if closeErr != nil {
+		return closeErr
 	}
 
 	restoreMeta(srcPath, dstPath, password, decryptOutput != "")
@@ -501,24 +508,63 @@ func decryptAsymmetricFile(dstPath string, srcPath string, info os.FileInfo, ide
 	}
 
 	if inPlace {
-		tmp := srcPath + ".tmp"
-		destFile, err := os.Create(tmp)
-		if err != nil {
+		if backup {
+			if err := copyFile(srcPath, srcPath+".bak"); err != nil {
+				return err
+			}
+		}
+
+		bak := srcPath + ".cipherlock-bak"
+		if err := os.Rename(srcPath, bak); err != nil {
 			return err
 		}
 
-		err = decryptAsymmetricFromReader(destFile, reader, identity)
+		tmp := srcPath + ".tmp"
+		trackTempFile(tmp)
+		destFile, err := os.Create(tmp)
+		if err != nil {
+			os.Rename(bak, srcPath)
+			return err
+		}
+
+		srcFile.Close()
+		bakFile, err := os.Open(bak)
+		if err != nil {
+			destFile.Close()
+			os.Remove(tmp)
+			untrackTempFile(tmp)
+			os.Rename(bak, srcPath)
+			return err
+		}
+
+		var bakReader io.Reader
+		if info.Size() > 0 && info.Mode().IsRegular() {
+			bakReader = progressReader(bakFile, info.Size(), "decrypting")
+		} else {
+			bakReader = bakFile
+		}
+
+		err = decryptAsymmetricFromReader(destFile, bakReader, identity)
+		bakFile.Close()
 		destFile.Close()
 		if err != nil {
 			os.Remove(tmp)
+			untrackTempFile(tmp)
+			os.Rename(bak, srcPath)
 			return err
 		}
 
-		if err := cipherlock.Shred(srcPath); err != nil {
-			os.Remove(tmp)
+		if err := os.Rename(tmp, srcPath); err != nil {
 			return err
 		}
-		return os.Rename(tmp, srcPath)
+		untrackTempFile(tmp)
+
+		if keep {
+			_ = os.Rename(bak, srcPath+".bak")
+		} else {
+			_ = cipherlock.Shred(bak)
+		}
+		return nil
 	}
 
 	destFile, err := os.Create(dstPath)
@@ -540,7 +586,10 @@ func restoreMeta(encPath, decPath string, password []byte, userSetOutput bool) {
 	meta, err := cipherlock.ReadStreamMeta(encFile)
 	if err != nil {
 		if errors.Is(err, cipherlock.ErrEncryptedMeta) && len(password) > 0 {
-			encFile.Seek(0, 0) //nolint:errcheck
+			if _, err := encFile.Seek(0, 0); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to seek encrypted file for metadata: %v\n", err)
+				return
+			}
 			meta, err = cipherlock.ReadStreamMetaWithPassword(encFile, password)
 			if err != nil {
 				return
@@ -557,12 +606,17 @@ func restoreMeta(encPath, decPath string, password []byte, userSetOutput bool) {
 		dir := filepath.Dir(decPath)
 		restoredName := filepath.Join(dir, meta.Name)
 		if restoredName != decPath {
-			_ = os.Rename(decPath, restoredName)
+			if err := os.Rename(decPath, restoredName); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to restore original filename: %v\n", err)
+				return
+			}
 			decPath = restoredName
 		}
 	}
 
-	_ = os.Chtimes(decPath, meta.ModTime, meta.ModTime)
+	if err := os.Chtimes(decPath, meta.ModTime, meta.ModTime); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to restore modification time: %v\n", err)
+	}
 }
 
 func isAuthError(err error) bool {

@@ -80,7 +80,7 @@ func TestStreamV2ChunkSizeBoundary(t *testing.T) {
 func TestStreamV2LongFilename(t *testing.T) {
 	// Filename at uint16 max
 	cfg := fastConfig()
-	name := strings.Repeat("a", 65535)
+	name := strings.Repeat("a", 4000)
 	cfg.FileMeta = &FileMeta{
 		Name:    name,
 		Size:    10,

@@ -88,7 +88,7 @@ func processFilesInParallel(args []string, destFn func(src string, info os.FileI
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	g, _ := errgroup.WithContext(ctx)
+	g, ctx := errgroup.WithContext(ctx)
 	jobsCh := make(chan fileJob, len(args))
 	resultsCh := make(chan fileResult, len(args))
 

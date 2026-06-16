@@ -139,6 +139,10 @@ func encryptStreamV2Meta(dst io.Writer, aesgcm cipher.AEAD, meta *FileMeta) erro
 	}
 	name := []byte(meta.Name)
 
+	if len(name) > maxMetaNameLen {
+		return fmt.Errorf("cipherlock: metadata name too long (%d bytes)", len(name))
+	}
+
 	var buf []byte
 	buf = binary.LittleEndian.AppendUint16(buf, uint16(len(name)))
 	buf = append(buf, name...)
@@ -199,7 +203,7 @@ func decryptStreamV2Meta(r io.Reader, aesgcm cipher.AEAD) (*FileMeta, error) {
 		return nil, ErrCorrupted
 	}
 	nameLen := int(binary.LittleEndian.Uint16(plaintext[:2]))
-	if len(plaintext) < 2+nameLen+8+8 { // Size(8) + ModTime(8)
+	if len(plaintext) < 2+nameLen+8+8+8 { // Size(8) + ModTime(8) + ExpiresAt(8)
 		return nil, ErrCorrupted
 	}
 	name := string(plaintext[2 : 2+nameLen])

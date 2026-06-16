@@ -46,8 +46,13 @@ func Shred(path string) error {
 		remaining -= writeLen
 	}
 
-	f.Sync()
-	f.Close() //nolint:errcheck
+	if err := f.Sync(); err != nil {
+		f.Close() //nolint:errcheck
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
 
 	zeros := make([]byte, 4096)
 	f, err = os.OpenFile(path, os.O_WRONLY, 0)

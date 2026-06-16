@@ -33,31 +33,11 @@ func newSafeWriter(dst io.Writer) *safeWriter {
 }
 
 func (sw *safeWriter) Write(p []byte) (int, error) {
-	if sw.direct {
-		return sw.dst.Write(p)
-	}
-	if sw.buf.Len() >= sw.threshold {
-		if _, err := sw.buf.WriteTo(sw.dst); err != nil {
-			return 0, err
-		}
-		sw.direct = true
-		return sw.dst.Write(p)
-	}
-	n, err := sw.buf.Write(p)
-	if err != nil {
-		return n, err
-	}
-	if sw.buf.Len() >= sw.threshold {
-		if _, err := sw.buf.WriteTo(sw.dst); err != nil {
-			return n, err
-		}
-		sw.direct = true
-	}
-	return len(p), nil
+	return sw.buf.Write(p)
 }
 
 func (sw *safeWriter) Commit() error {
-	if sw.direct {
+	if sw.buf.Len() == 0 {
 		return nil
 	}
 	_, err := sw.buf.WriteTo(sw.dst)
@@ -67,7 +47,6 @@ func (sw *safeWriter) Commit() error {
 
 func (sw *safeWriter) Discard() {
 	sw.buf.Reset()
-	sw.direct = true
 }
 
 // ReKey decrypts data from src with oldPassword and re-encrypts it with

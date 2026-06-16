@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -123,8 +124,8 @@ func TestDecryptAsymmetricWrongIdentity(t *testing.T) {
 
 func TestEncryptAsymmetricNoRecipients(t *testing.T) {
 	err := EncryptAsymmetric(nil, nil, []*X25519Recipient{}, nil)
-	if err != ErrAtLeastOnePassword {
-		t.Fatalf("expected ErrAtLeastOnePassword, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "at least one recipient required") {
+		t.Fatalf("expected error about missing recipient, got %v", err)
 	}
 }
 

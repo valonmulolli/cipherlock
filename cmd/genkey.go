@@ -48,10 +48,6 @@ By default, keys are written to the current directory as:
 		identityPath := base + ".identity"
 		pubPath := base + ".pub"
 
-		if _, err := os.Stat(identityPath); err == nil {
-			return fmt.Errorf("output %q exists", identityPath)
-		}
-
 		var passphrase []byte
 		if genkeyPassphraseFile != "" {
 			p, err := os.ReadFile(genkeyPassphraseFile)
@@ -65,7 +61,19 @@ By default, keys are written to the current directory as:
 		if err != nil {
 			return fmt.Errorf("serializing identity: %w", err)
 		}
-		if err := os.WriteFile(identityPath, serialized, 0600); err != nil {
+
+		f, err := os.OpenFile(identityPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if err != nil {
+			if os.IsExist(err) {
+				return fmt.Errorf("output %q exists", identityPath)
+			}
+			return fmt.Errorf("writing identity: %w", err)
+		}
+		if _, err := f.Write(serialized); err != nil {
+			f.Close()
+			return fmt.Errorf("writing identity: %w", err)
+		}
+		if err := f.Close(); err != nil {
 			return fmt.Errorf("writing identity: %w", err)
 		}
 		fmt.Fprintf(os.Stderr, "Identity (private key): %s\n", identityPath)
