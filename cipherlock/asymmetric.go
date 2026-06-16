@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/ed25519"
 	"crypto/hkdf"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -15,6 +17,7 @@ import (
 
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/curve25519"
+	"golang.org/x/crypto/ssh"
 )
 
 // X25519Recipient is a public key that can encrypt data for its corresponding identity.
@@ -50,6 +53,32 @@ func X25519IdentityFromPrivateKey(privKey []byte) (*X25519Identity, error) {
 		PrivateKey: privKey,
 		PublicKey:  pubKey,
 	}, nil
+}
+
+// IdentityFromSSHPrivateKey parses a PEM-encoded SSH private key (Ed25519)
+// and returns an X25519Identity derived from it. Ed25519 and X25519 share
+// the same curve (Curve25519); the seed is converted via SHA-512 + standard
+// X25519 clamping. The resulting identity can be used to decrypt files that
+// were encrypted to the derived X25519 public key.
+//
+// For RSA and ECDSA keys, it returns ErrUnsupportedKeyType.
+func IdentityFromSSHPrivateKey(pemData []byte) (*X25519Identity, error) {
+	key, err := ssh.ParseRawPrivateKey(pemData)
+	if err != nil {
+		return nil, fmt.Errorf("cipherlock: parse SSH key: %w", err)
+	}
+
+	priv, ok := key.(ed25519.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("cipherlock: unsupported SSH key type %T (only Ed25519 is supported)", key)
+	}
+
+	seed := priv.Seed()
+	h := sha512.Sum512(seed)
+	h[0] &= 248
+	h[31] &= 127
+	h[31] |= 64
+	return X25519IdentityFromPrivateKey(h[:32])
 }
 
 // NewX25519Recipient creates a recipient from a raw 32-byte public key.

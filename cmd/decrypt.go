@@ -94,6 +94,9 @@ plaintext to stdout.`,
 				}
 				identity, err = cipherlock.DeserializeX25519Identity(data, passphrase)
 			}
+			if err != nil && identity == nil {
+				identity, err = cipherlock.IdentityFromSSHPrivateKey(data)
+			}
 			if err != nil {
 				return fmt.Errorf("parsing identity file: %w", err)
 			}
