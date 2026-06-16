@@ -145,16 +145,20 @@ func unsealFileKey(entries []recipientEntry, password []byte) ([]byte, error) {
 		key := argon2.IDKey(password, entry.Salt, entry.Time, entry.Memory, entry.Threads, entry.KeyLen)
 		block, err := aes.NewCipher(key)
 		if err != nil {
+			clear(key)
 			continue
 		}
 		gcm, err := cipher.NewGCM(block)
 		if err != nil {
+			clear(key)
 			continue
 		}
 		plain, err := gcm.Open(nil, entry.KeyNonce[:], entry.SealedKey, nil)
 		if err != nil {
+			clear(key)
 			continue
 		}
+		clear(key)
 		return plain, nil
 	}
 	return nil, ErrAuthFailed

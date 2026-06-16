@@ -235,6 +235,7 @@ func encryptStreamV2(dst io.Writer, src io.Reader, key []byte, chunkSize int, me
 	if err != nil {
 		return err
 	}
+	defer clear(key)
 	aesgcm, err := cipher.NewGCM(block)
 	if err != nil {
 		return err
@@ -306,6 +307,7 @@ func decryptStreamV2(dst io.Writer, src io.Reader, password []byte) (*FileMeta, 
 	if err != nil {
 		return nil, err
 	}
+	defer clear(key)
 	aesgcm, err := cipher.NewGCM(block)
 	if err != nil {
 		return nil, err
@@ -413,6 +415,7 @@ func EncryptStreamV2(dst io.Writer, src io.Reader, password []byte, config *Conf
 	if err != nil {
 		return err
 	}
+	defer clear(key)
 
 	if err := encryptStreamV2(dst, src, key, chunkSize, config.FileMeta, hasher); err != nil {
 		return err

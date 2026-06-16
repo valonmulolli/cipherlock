@@ -170,11 +170,13 @@ func sealFileKey(fileKey []byte, recipient *X25519Recipient) (*asymmetricRecipie
 	}
 
 	shared, err := curve25519.X25519(ephemeralPriv, recipient.PublicKey)
+	clear(ephemeralPriv)
 	if err != nil {
 		return nil, err
 	}
 
 	wrappingKey, nonce, err := deriveWrappingKey(shared, ephemeralPub, recipient.PublicKey)
+	clear(shared)
 	if err != nil {
 		return nil, err
 	}
@@ -183,6 +185,7 @@ func sealFileKey(fileKey []byte, recipient *X25519Recipient) (*asymmetricRecipie
 	if err != nil {
 		return nil, err
 	}
+	defer clear(wrappingKey)
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
 		return nil, err
@@ -210,6 +213,7 @@ func unsealAsymmetricFileKey(entry *asymmetricRecipientEntry, identity *X25519Id
 	}
 
 	wrappingKey, _, err := deriveWrappingKey(shared, entry.EphemeralPK, identity.PublicKey)
+	clear(shared)
 	if err != nil {
 		return nil, err
 	}
@@ -218,6 +222,7 @@ func unsealAsymmetricFileKey(entry *asymmetricRecipientEntry, identity *X25519Id
 	if err != nil {
 		return nil, err
 	}
+	defer clear(wrappingKey)
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
 		return nil, err
@@ -319,6 +324,7 @@ func encryptAsymmetricBody(dst io.Writer, src io.Reader, fileKey []byte, chunkSi
 	if err != nil {
 		return err
 	}
+	defer clear(fileKey)
 	aesgcm, err := cipher.NewGCM(block)
 	if err != nil {
 		return err
@@ -440,6 +446,7 @@ func decryptAsymmetricBody(dst io.Writer, src io.Reader, fileKey []byte, flags b
 	if err != nil {
 		return nil, err
 	}
+	defer clear(fileKey)
 	aesgcm, err := cipher.NewGCM(block)
 	if err != nil {
 		return nil, err
