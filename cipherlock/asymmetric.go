@@ -381,34 +381,42 @@ func encryptAsymmetricBody(dst io.Writer, src io.Reader, fileKey []byte, chunkSi
 // It returns ErrInvalidFormat, ErrVersionMismatch, ErrAuthFailed, or
 // ErrChecksumMismatch on failure.
 func DecryptAsymmetric(dst io.Writer, src io.Reader, identity *X25519Identity) error {
+	_, err := DecryptAsymmetricWithMeta(dst, src, identity)
+	return err
+}
+
+// DecryptAsymmetricWithMeta is the metadata-aware form of DecryptAsymmetric.
+// The returned *FileMeta is non-nil when the encrypted file was created with
+// FileMeta attached (original filename, size, modification time).
+func DecryptAsymmetricWithMeta(dst io.Writer, src io.Reader, identity *X25519Identity) (*FileMeta, error) {
 	if identity == nil {
-		return errors.New("cipherlock: identity is required for asymmetric decryption")
+		return nil, errors.New("cipherlock: identity is required for asymmetric decryption")
 	}
 
 	var hdrMagic [4]byte
 	if _, err := io.ReadFull(src, hdrMagic[:]); err != nil {
-		return ErrInvalidFormat
+		return nil, ErrInvalidFormat
 	}
 	if hdrMagic != magic {
-		return ErrInvalidFormat
+		return nil, ErrInvalidFormat
 	}
 
 	var version byte
 	if err := binary.Read(src, binary.LittleEndian, &version); err != nil {
-		return ErrInvalidFormat
+		return nil, ErrInvalidFormat
 	}
 	if version != formatVersionAsymmetric {
-		return ErrVersionMismatch
+		return nil, ErrVersionMismatch
 	}
 
 	entries, flags, err := readAsymmetricHeader(src)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	fileKey, err := tryUnsealAsymmetric(entries, identity)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	return decryptAsymmetricBody(dst, src, fileKey, flags)
@@ -427,14 +435,14 @@ func tryUnsealAsymmetric(entries []asymmetricRecipientEntry, identity *X25519Ide
 	return nil, ErrAuthFailed
 }
 
-func decryptAsymmetricBody(dst io.Writer, src io.Reader, fileKey []byte, flags byte) error {
+func decryptAsymmetricBody(dst io.Writer, src io.Reader, fileKey []byte, flags byte) (*FileMeta, error) {
 	block, err := aes.NewCipher(fileKey)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	aesgcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	var hasher hash.Hash
@@ -442,38 +450,40 @@ func decryptAsymmetricBody(dst io.Writer, src io.Reader, fileKey []byte, flags b
 		hasher = sha256.New()
 	}
 
+	var meta *FileMeta
 	if flags&flagHasMetadata != 0 {
-		if _, err := decryptStreamV2Meta(src, aesgcm); err != nil {
-			return err
+		meta, err = decryptStreamV2Meta(src, aesgcm)
+		if err != nil {
+			return nil, err
 		}
 	}
 
 	for {
 		var nonce [nonceSize]byte
 		if _, err := io.ReadFull(src, nonce[:]); err != nil {
-			return ErrInvalidFormat
+			return nil, ErrInvalidFormat
 		}
 
 		var ctLen uint32
 		if err := binary.Read(src, binary.LittleEndian, &ctLen); err != nil {
-			return ErrInvalidFormat
+			return nil, ErrInvalidFormat
 		}
 		if ctLen == 0 {
 			break
 		}
 
 		if ctLen > uint32(maxChunkSize)+16 {
-			return ErrCorrupted
+			return nil, ErrCorrupted
 		}
 
 		ciphertext := make([]byte, ctLen)
 		if _, err := io.ReadFull(src, ciphertext); err != nil {
-			return ErrInvalidFormat
+			return nil, ErrInvalidFormat
 		}
 
 		plaintext, err := aesgcm.Open(nil, nonce[:], ciphertext, nil)
 		if err != nil {
-			return ErrAuthFailed
+			return nil, ErrAuthFailed
 		}
 
 		if hasher != nil {
@@ -481,22 +491,22 @@ func decryptAsymmetricBody(dst io.Writer, src io.Reader, fileKey []byte, flags b
 		}
 
 		if _, err := dst.Write(plaintext); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	if hasher != nil {
 		var expected [checksumSize]byte
 		if _, err := io.ReadFull(src, expected[:]); err != nil {
-			return ErrCorrupted
+			return nil, ErrCorrupted
 		}
 		actual := hasher.Sum(nil)
 		if expected != [32]byte(actual) {
-			return ErrChecksumMismatch
+			return nil, ErrChecksumMismatch
 		}
 	}
 
-	return nil
+	return meta, nil
 }
 
 const (

@@ -10,9 +10,10 @@ const DefaultChunkSize = 64 * 1024
 
 // FileMeta contains metadata about an encrypted file including its name, size, and modification time.
 type FileMeta struct {
-	Name    string
-	Size    int64
-	ModTime time.Time
+	Name      string
+	Size      int64
+	ModTime   time.Time
+	ExpiresAt time.Time
 }
 
 // Profile defines Argon2id parameters that can be applied to a Config.

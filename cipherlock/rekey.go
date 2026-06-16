@@ -230,35 +230,45 @@ func ReKeyFile(source, dest string, oldPassword, newPassword []byte, config *Con
 		return ReKey(destFile, srcFile, oldPassword, newPassword, config)
 	}
 
-	// In-place: write to tempfile, shred the original, rename.
+	// In-place: rename original to a safe backup, write to tempfile,
+	// then rename temp into place. This is SIGINT-safe: the original is
+	// preserved as .cipherlock-bak until the temp is in place at source.
 	srcFile, err := os.Open(source)
 	if err != nil {
 		return err
 	}
 	defer srcFile.Close() //nolint:errcheck
 
+	bak := source + ".cipherlock-bak"
+	if err := os.Rename(source, bak); err != nil {
+		return err
+	}
+
 	tmp, err := os.CreateTemp(filepath.Dir(source), ".cipherlock-rekey-*")
 	if err != nil {
+		os.Rename(bak, source)
 		return err
 	}
 	tmpName := tmp.Name()
-	defer func() {
-		// Best-effort cleanup if we never rename (caller sees the
-		// error; we drop the partial tempfile).
-		_ = os.Remove(tmpName)
-	}()
 
 	if err := ReKey(tmp, srcFile, oldPassword, newPassword, config); err != nil {
 		tmp.Close() //nolint:errcheck
+		os.Remove(tmpName)
+		os.Rename(bak, source) // restore original
 		return err
 	}
 	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		os.Rename(bak, source) // restore original
 		return err
 	}
 
-	// Old file is no longer needed; best-effort overwrite. Failure
-	// to shred is non-fatal -- the rename still produces a correct
-	// output, just leaves the old ciphertext on disk.
-	_ = Shred(source)
-	return os.Rename(tmpName, source)
+	if err := os.Rename(tmpName, source); err != nil {
+		os.Remove(tmpName)
+		os.Rename(bak, source) // restore original
+		return err
+	}
+
+	_ = Shred(bak)
+	return nil
 }

@@ -75,6 +75,25 @@ var listProfilesCmd = &cobra.Command{
 	},
 }
 
+var showProfileCmd = &cobra.Command{
+	Use:   "show-profile <name>",
+	Short: "Display a configuration profile",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name := args[0]
+		profile, err := lookupProfile(name)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("profile: %s\n", name)
+		fmt.Printf("  time:     %d\n", profile.Time)
+		fmt.Printf("  memory:   %d KB\n", profile.Memory)
+		fmt.Printf("  threads:  %d\n", profile.Threads)
+		fmt.Printf("  checksum: %t\n", profile.Checksum)
+		return nil
+	},
+}
+
 var removeProfileCmd = &cobra.Command{
 	Use:   "remove-profile <name>",
 	Short: "Remove a configuration profile",
@@ -202,6 +221,7 @@ func profileNames() []string {
 
 func init() {
 	rootCmd.AddCommand(configCmd)
+	rootCmd.AddCommand(showProfileCmd)
 	configCmd.AddCommand(setProfileCmd)
 	configCmd.AddCommand(listProfilesCmd)
 	configCmd.AddCommand(removeProfileCmd)

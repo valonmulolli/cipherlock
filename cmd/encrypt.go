@@ -27,6 +27,7 @@ var (
 	recipientPubkeys []string
 	passwordEnv      string
 	passwordFD       string
+	passwordStdin    bool
 	profileName      string
 	outDir           string
 	keychainFlag     bool
@@ -59,7 +60,7 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 
 		var passwords [][]byte
 
-		if len(recipientPubkeys) > 0 && len(recipientPwds) == 0 && !keychainFlag && keyFilePath == "" && passwordEnv == "" && passwordFD == "" && !genPassword {
+		if len(recipientPubkeys) > 0 && len(recipientPwds) == 0 && !keychainFlag && keyFilePath == "" && passwordEnv == "" && passwordFD == "" && !passwordStdin && !genPassword {
 			passwords = nil
 		} else if keychainFlag {
 			if keyFilePath != "" {
@@ -79,7 +80,7 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			}
 			primary, err := resolvePassword(passwordSource{
 				FD: passwordFD, Env: passwordEnv, KeyFile: keyFilePath,
-				Label: "Enter your password: ",
+				Stdin: passwordStdin, Label: "Enter your password: ",
 			})
 			if err != nil {
 				return err
@@ -89,7 +90,7 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 		} else {
 			primary, err := resolvePassword(passwordSource{
 				FD: passwordFD, Env: passwordEnv, KeyFile: keyFilePath,
-				GenPwd: genPassword, Label: "Enter password: ",
+				Stdin: passwordStdin, GenPwd: genPassword, Label: "Enter password: ",
 			})
 			if err != nil {
 				return err
@@ -146,6 +147,29 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 
 		if err := validateEncryptFlags(args, outputPath, outDir, inPlace); err != nil {
 			return err
+		}
+
+		if recursive {
+			var err error
+			args, err = expandArgs(args)
+			if err != nil {
+				return err
+			}
+		}
+
+		if dryRun {
+			for _, src := range args {
+				dest := outputPath
+				if inPlace {
+					dest = src
+				} else if outDir != "" {
+					dest = filepath.Join(outDir, filepath.Base(src)+".encrypted")
+				} else if dest == "" {
+					dest = src + ".encrypted"
+				}
+				fmt.Fprintf(os.Stderr, "would encrypt %s -> %s\n", src, dest)
+			}
+			return nil
 		}
 
 		if len(args) == 1 && args[0] == "-" {
@@ -250,6 +274,15 @@ func validateEncryptFlags(args []string, output, outDir string, inPlace bool) er
 	if output != "" && len(args) > 1 {
 		return fmt.Errorf("--output cannot be used with multiple input files")
 	}
+	if keep && !inPlace {
+		return fmt.Errorf("--keep requires --in-place")
+	}
+	if backup && !inPlace {
+		return fmt.Errorf("--backup requires --in-place")
+	}
+	if keep && backup {
+		return fmt.Errorf("--keep and --backup are mutually exclusive")
+	}
 	return nil
 }
 
@@ -296,31 +329,57 @@ func encryptFile(srcPath, dstPath string, info os.FileInfo, passwords [][]byte, 
 	}
 
 	if inPlace {
-		srcReader := progressReader(srcFile, info.Size(), "encrypting")
-		stopKDF := showKDF()
+		if backup {
+			if err := copyFile(srcPath, srcPath+".bak"); err != nil {
+				return err
+			}
+		}
+
+		// Rename original to a safe backup before we write anything.
+		// srcFile's fd still points to the same inode (now at bak),
+		// so reads continue to work. If SIGINT hits here, the user's
+		// original is preserved as .cipherlock-bak.
+		bak := srcPath + ".cipherlock-bak"
+		if err := os.Rename(srcPath, bak); err != nil {
+			return err
+		}
 
 		tmp := srcPath + ".tmp"
+		trackTempFile(tmp)
 		destFile, err := os.Create(tmp)
 		if err != nil {
+			os.Rename(bak, srcPath)
 			srcFile.Close()
 			return err
 		}
+
+		srcReader := progressReader(srcFile, info.Size(), "encrypting")
+		stopKDF := showKDF()
 
 		err = encryptToWriter(destFile, srcReader, passwords, asymmetricRecipients, &cfg)
 		destFile.Close()
 		stopKDF()
 		if err != nil {
-			srcFile.Close()
 			os.Remove(tmp)
+			untrackTempFile(tmp)
+			os.Rename(bak, srcPath) // restore original
+			srcFile.Close()
 			return err
 		}
 
 		srcFile.Close()
-		if err := cipherlock.Shred(srcPath); err != nil {
-			os.Remove(tmp)
+
+		if err := os.Rename(tmp, srcPath); err != nil {
 			return err
 		}
-		return os.Rename(tmp, srcPath)
+		untrackTempFile(tmp)
+
+		if keep {
+			_ = os.Rename(bak, srcPath+".bak")
+		} else {
+			_ = cipherlock.Shred(bak)
+		}
+		return nil
 	}
 
 	defer srcFile.Close()
@@ -389,10 +448,28 @@ func init() {
 	encryptCmd.Flags().BoolVar(&forceEncrypt, "force", false, "overwrite existing output files without prompting")
 	encryptCmd.Flags().StringVar(&passwordEnv, "password-env", "", "read password from environment variable")
 	encryptCmd.Flags().StringVar(&passwordFD, "password-fd", "", "read password from file descriptor number (e.g. 0 for stdin pipe)")
+	encryptCmd.Flags().BoolVar(&passwordStdin, "password-stdin", false, "read password from stdin")
 	encryptCmd.Flags().IntVarP(&jobs, "jobs", "j", 0, "number of parallel jobs (default: sequential)")
 	encryptCmd.RegisterFlagCompletionFunc("profile", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
 		return profileNames(), cobra.ShellCompDirectiveDefault
 	})
+}
+
+func copyFile(src, dst string) error {
+	s, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	d, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+
+	_, err = io.Copy(d, s)
+	return err
 }
 
 func generatePassword(length int) ([]byte, error) {

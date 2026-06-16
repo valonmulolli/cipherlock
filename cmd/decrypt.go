@@ -15,15 +15,16 @@ import (
 )
 
 var (
-	decryptOutput      string
-	decryptKeyFile     string
-	decryptOutDir      string
-	checkOnly          bool
-	forceOverwrite     bool
-	decryptDirMode     bool
-	identityFile       string
-	decryptPasswordFD  string
-	decryptPasswordEnv string
+	decryptOutput        string
+	decryptKeyFile       string
+	decryptOutDir        string
+	checkOnly            bool
+	forceOverwrite       bool
+	decryptDirMode       bool
+	identityFile         string
+	decryptPasswordFD    string
+	decryptPasswordEnv   string
+	decryptPasswordStdin bool
 )
 
 var decryptCmd = &cobra.Command{
@@ -54,6 +55,29 @@ plaintext to stdout.`,
 		}
 		if decryptOutput != "" && len(args) > 1 {
 			return fmt.Errorf("--output cannot be used with multiple input files")
+		}
+
+		if recursive {
+			var err error
+			args, err = expandArgs(args)
+			if err != nil {
+				return err
+			}
+		}
+
+		if dryRun {
+			for _, src := range args {
+				dest := decryptOutput
+				if inPlace {
+					dest = src
+				} else if decryptOutDir != "" {
+					dest = filepath.Join(decryptOutDir, filepath.Base(defaultDecryptPath(src)))
+				} else if dest == "" {
+					dest = defaultDecryptPath(src)
+				}
+				fmt.Fprintf(os.Stderr, "would decrypt %s -> %s\n", src, dest)
+			}
+			return nil
 		}
 
 		var identity *cipherlock.X25519Identity
@@ -160,7 +184,7 @@ plaintext to stdout.`,
 		} else {
 			pwd, err := resolvePassword(passwordSource{
 				FD: decryptPasswordFD, Env: decryptPasswordEnv, KeyFile: decryptKeyFile,
-				Label: "Enter password: ",
+				Stdin: decryptPasswordStdin, Label: "Enter password: ",
 			})
 			if err != nil {
 				return err
@@ -337,15 +361,31 @@ func decryptDirSource(srcPath string, info os.FileInfo, password []byte) error {
 
 func decryptFile(srcPath, dstPath string, info os.FileInfo, password []byte) error {
 	if inPlace {
-		tmp := srcPath + ".tmp"
-		destFile, err := os.Create(tmp)
-		if err != nil {
+		if backup {
+			if err := copyFile(srcPath, srcPath+".bak"); err != nil {
+				return err
+			}
+		}
+
+		bak := srcPath + ".cipherlock-bak"
+		if err := os.Rename(srcPath, bak); err != nil {
 			return err
 		}
 
-		srcFile, err := os.Open(srcPath)
+		tmp := srcPath + ".tmp"
+		trackTempFile(tmp)
+		destFile, err := os.Create(tmp)
+		if err != nil {
+			os.Rename(bak, srcPath)
+			return err
+		}
+
+		srcFile, err := os.Open(bak)
 		if err != nil {
 			destFile.Close()
+			os.Remove(tmp)
+			untrackTempFile(tmp)
+			os.Rename(bak, srcPath)
 			return err
 		}
 
@@ -353,22 +393,30 @@ func decryptFile(srcPath, dstPath string, info os.FileInfo, password []byte) err
 		stopKDF := showKDF()
 
 		err = decryptFromReader(destFile, srcReader, password)
-		srcFile.Close()  //nolint:errcheck
-		destFile.Close() //nolint:errcheck
+		srcFile.Close()
+		destFile.Close()
 		stopKDF()
 		if err != nil {
-			os.Remove(tmp) //nolint:errcheck
+			os.Remove(tmp)
+			untrackTempFile(tmp)
+			os.Rename(bak, srcPath) // restore original
 			if isAuthError(err) {
 				return errors.New("decryption failed: wrong password or corrupted data")
 			}
 			return err
 		}
 
-		if err := cipherlock.Shred(srcPath); err != nil {
-			os.Remove(tmp) //nolint:errcheck
+		if err := os.Rename(tmp, srcPath); err != nil {
 			return err
 		}
-		return os.Rename(tmp, srcPath)
+		untrackTempFile(tmp)
+
+		if keep {
+			_ = os.Rename(bak, srcPath+".bak")
+		} else {
+			_ = cipherlock.Shred(bak)
+		}
+		return nil
 	}
 
 	destFile, err := os.Create(dstPath)
@@ -557,5 +605,6 @@ func init() {
 	decryptCmd.Flags().StringVar(&identityFile, "identity", "", "path to X25519 identity (private key) file for asymmetric decryption")
 	decryptCmd.Flags().StringVar(&decryptPasswordEnv, "password-env", "", "read password from environment variable")
 	decryptCmd.Flags().StringVar(&decryptPasswordFD, "password-fd", "", "read password from file descriptor number (e.g. 0 for stdin pipe)")
+	decryptCmd.Flags().BoolVar(&decryptPasswordStdin, "password-stdin", false, "read password from stdin")
 	decryptCmd.Flags().IntVarP(&jobs, "jobs", "j", 0, "number of parallel workers (default: sequential)")
 }

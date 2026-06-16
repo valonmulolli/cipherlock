@@ -134,7 +134,7 @@ func estimateStrength(pwd []byte) strength {
 }
 
 func showStrength(pwd []byte) {
-	if quiet {
+	if quiet.Load() {
 		return
 	}
 	s := estimateStrength(pwd)

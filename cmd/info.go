@@ -11,7 +11,7 @@ import (
 )
 
 var infoCmd = &cobra.Command{
-	Use:   "info [flags] <file>",
+	Use:   "tumbler [flags] <file>",
 	Short: "Display encrypted file metadata",
 	Long: `Show metadata about an encrypted cipherlock file.
 

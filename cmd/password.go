@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"io"
@@ -17,6 +18,15 @@ func readPasswordFromEnv(envVar string) ([]byte, error) {
 		return nil, fmt.Errorf("environment variable %q is empty or not set", envVar)
 	}
 	return []byte(strings.TrimRight(v, "\n\r")), nil
+}
+
+func readPasswordFromStdin() ([]byte, error) {
+	reader := bufio.NewReader(os.Stdin)
+	data, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return nil, fmt.Errorf("reading password from stdin: %w", err)
+	}
+	return []byte(strings.TrimRight(data, "\n\r")), nil
 }
 
 func readPasswordFromFD(fdStr string) ([]byte, error) {
@@ -48,6 +58,7 @@ type passwordSource struct {
 	FD         string // --password-fd
 	Env        string // --password-env
 	KeyFile    string // --key-file
+	Stdin      bool   // --password-stdin
 	KeychainOn bool   // enable keychain lookup
 	KeychainAc string // keychain account name (when KeychainOn is true)
 	GenPwd     bool   // generate a random password (encrypt only)
@@ -69,6 +80,8 @@ func resolvePassword(src passwordSource) ([]byte, error) {
 		return []byte(pwdStr), nil
 	case src.FD != "":
 		return readPasswordFromFD(src.FD)
+	case src.Stdin:
+		return readPasswordFromStdin()
 	case src.Env != "":
 		return readPasswordFromEnv(src.Env)
 	case src.KeyFile != "":
@@ -82,7 +95,7 @@ func resolvePassword(src passwordSource) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		if quiet {
+		if quiet.Load() {
 			fmt.Fprintln(os.Stderr, string(pwd))
 		} else {
 			fmt.Fprintln(os.Stderr, "password:", string(pwd))

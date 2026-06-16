@@ -15,7 +15,7 @@ var genkeyDir string
 var genkeyPassphraseFile string
 
 var genKeyCmd = &cobra.Command{
-	Use:   "generate-keypair",
+	Use:   "dial",
 	Short: "Generate an X25519 encryption key pair",
 	Long: `Generate a new X25519 key pair for asymmetric encryption.
 

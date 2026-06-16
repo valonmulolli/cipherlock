@@ -3,12 +3,70 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"golang.org/x/sync/errgroup"
 
 	"github.com/valonmulolli/cipherlock/cipherlock"
 )
+
+func expandArgs(args []string) ([]string, error) {
+	if !recursive {
+		return args, nil
+	}
+	var expanded []string
+	for _, arg := range args {
+		info, err := os.Stat(arg)
+		if err != nil {
+			return nil, err
+		}
+		if !info.IsDir() {
+			expanded = append(expanded, arg)
+			continue
+		}
+		err = filepath.WalkDir(arg, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				if strings.HasPrefix(d.Name(), ".") && d.Name() != "." {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if strings.HasPrefix(d.Name(), ".") {
+				return nil
+			}
+			if include != "" {
+				match, err := filepath.Match(include, d.Name())
+				if err != nil {
+					return err
+				}
+				if !match {
+					return nil
+				}
+			}
+			if exclude != "" {
+				match, err := filepath.Match(exclude, d.Name())
+				if err != nil {
+					return err
+				}
+				if match {
+					return nil
+				}
+			}
+			expanded = append(expanded, path)
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	return expanded, nil
+}
 
 type fileJob struct {
 	src  string

@@ -144,6 +144,7 @@ func encryptStreamV2Meta(dst io.Writer, aesgcm cipher.AEAD, meta *FileMeta) erro
 	buf = append(buf, name...)
 	buf = binary.LittleEndian.AppendUint64(buf, uint64(meta.Size))
 	buf = binary.LittleEndian.AppendUint64(buf, uint64(meta.ModTime.UnixNano()))
+	buf = binary.LittleEndian.AppendUint64(buf, uint64(meta.ExpiresAt.UnixNano()))
 
 	nonce := make([]byte, nonceSize)
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
@@ -206,11 +207,20 @@ func decryptStreamV2Meta(r io.Reader, aesgcm cipher.AEAD) (*FileMeta, error) {
 	size := int64(binary.LittleEndian.Uint64(plaintext[off : off+8]))
 	modNano := int64(binary.LittleEndian.Uint64(plaintext[off+8 : off+16]))
 
-	return &FileMeta{
+	meta := &FileMeta{
 		Name:    name,
 		Size:    size,
 		ModTime: time.Unix(0, modNano),
-	}, nil
+	}
+
+	if len(plaintext) >= off+24 {
+		expNano := int64(binary.LittleEndian.Uint64(plaintext[off+16 : off+24]))
+		if expNano != 0 {
+			meta.ExpiresAt = time.Unix(0, expNano)
+		}
+	}
+
+	return meta, nil
 }
 
 // encryptStreamV2 encrypts src in chunks (with optional leading metadata chunk) using
