@@ -1,6 +1,7 @@
 package cipherlock
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -391,7 +392,7 @@ func decryptStreamMultiBody(dst io.Writer, src io.Reader, fileKey []byte, flags 
 			return nil, ErrCorrupted
 		}
 		actual := hasher.Sum(nil)
-		if expected != [32]byte(actual) {
+		if !bytes.Equal(expected[:], actual) {
 			return nil, ErrChecksumMismatch
 		}
 	}

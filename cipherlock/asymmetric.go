@@ -501,7 +501,7 @@ func decryptAsymmetricBody(dst io.Writer, src io.Reader, fileKey []byte, flags b
 			return nil, ErrCorrupted
 		}
 		actual := hasher.Sum(nil)
-		if expected != [32]byte(actual) {
+		if !bytes.Equal(expected[:], actual) {
 			return nil, ErrChecksumMismatch
 		}
 	}

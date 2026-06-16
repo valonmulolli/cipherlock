@@ -72,6 +72,8 @@ func Shred(path string) error {
 		remaining -= writeLen
 	}
 
-	f.Sync()
+	if err := f.Sync(); err != nil {
+		return err
+	}
 	return os.Remove(path)
 }
