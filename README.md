@@ -4,6 +4,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/valonmulolli/cipherlock.svg)](https://pkg.go.dev/github.com/valonmulolli/cipherlock)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/valonmulolli/cipherlock)](https://go.dev/dl/)
 [![License](https://img.shields.io/github/license/valonmulolli/cipherlock)](LICENSE)
+[![asciicast](https://asciinema.org/a/Kkqo7tcuDHlGcHdg.svg)](https://asciinema.org/a/Kkqo7tcuDHlGcHdg)
 
 AES-256-GCM file encryption with Argon2id key derivation.
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"runtime/debug"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -36,7 +37,17 @@ var (
 
 // Version is set at build time via -ldflags.
 // Example: go build -ldflags "-X github.com/valonmulolli/cipherlock/cmd.Version=v1.2.0" .
+// Falls back to the module version reported by debug.ReadBuildInfo()
+// when installed with 'go install example/cipherlock@v1.2.0'.
 var Version = "dev"
+
+func init() {
+	if Version == "dev" {
+		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+			Version = info.Main.Version
+		}
+	}
+}
 
 type helpStyles struct {
 	banner  lipgloss.Style

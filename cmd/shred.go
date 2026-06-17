@@ -77,11 +77,6 @@ func (s *shredProgress) update(pass, totalPasses int, bytesWritten, fileSize int
 }
 
 func (s *shredProgress) render(totalPasses int) {
-	elapsed := time.Since(s.start).Seconds()
-	if elapsed == 0 {
-		elapsed = 0.01
-	}
-
 	pct := float64(s.written) / float64(s.size)
 	filled := int(math.Round(pct * float64(barWidth)))
 
