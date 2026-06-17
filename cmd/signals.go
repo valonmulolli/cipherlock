@@ -74,14 +74,18 @@ func inPlaceWrite(srcPath string, keepBak bool, writeFn func(tmpPath, bakPath st
 	if err := writeFn(tmp, bak); err != nil {
 		os.Remove(tmp)
 		untrackTempFile(tmp)
-		os.Rename(bak, srcPath)
+		if rerr := os.Rename(bak, srcPath); rerr != nil {
+			return fmt.Errorf("write failed (%w) and restore failed (%v); data in %s", err, rerr, bak)
+		}
 		return err
 	}
 
 	if err := os.Rename(tmp, srcPath); err != nil {
 		os.Remove(tmp)
 		untrackTempFile(tmp)
-		os.Rename(bak, srcPath)
+		if rerr := os.Rename(bak, srcPath); rerr != nil {
+			return fmt.Errorf("rename failed (%w) and restore failed (%v); data in %s", err, rerr, bak)
+		}
 		return err
 	}
 	untrackTempFile(tmp)
@@ -89,7 +93,9 @@ func inPlaceWrite(srcPath string, keepBak bool, writeFn func(tmpPath, bakPath st
 	if keepBak {
 		_ = os.Rename(bak, srcPath+".bak")
 	} else {
-		_ = cipherlock.Shred(bak)
+		if sderr := cipherlock.Shred(bak); sderr != nil {
+			return fmt.Errorf("shred backup failed: %w", sderr)
+		}
 	}
 	return nil
 }

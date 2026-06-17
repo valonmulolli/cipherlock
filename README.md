@@ -29,16 +29,25 @@ cipherlock is a Go library and CLI tool for encrypting files and directories usi
 - **Library + CLI dual use**: Importable Go package with a full-featured command-line interface built with Cobra.
 - **Password strength estimation**: Rates password entropy from "very weak" to "very strong" on encrypt/rekey.
 - **Saved config profiles**: Store and reuse Argon2id parameter sets with `config set-profile` / `--profile`.
-- **KDF progress indicator**: "Deriving key..." throbber and file-size progress bars during encrypt/decrypt.
+- **KDF progress indicator**: "Deriving key..." animated scramble spinner and file-size progress bars during encrypt/decrypt/rekey.
 - **Context-aware library API**: `EncryptContext`, `DecryptContext`, `DecryptWithMetaContext`, `EncryptStreamContext` — cancel long operations via Go contexts.
 - **Sentinel error types**: `ErrAuthFailed`, `ErrChecksumMismatch`, `ErrCorrupted` — programmatic error handling instead of string matching.
 - **Encrypted-metadata streaming (v0x06)**: Optional `FileMeta` is stored as an encrypted chunk so the original filename and size are not visible without the password.
 - **Streaming multi-recipient (v0x07)**: Multi-recipient encryption that streams the plaintext in fixed-size chunks. No upper file size limit, even with `--recipient` flags.
 - **X25519 asymmetric encryption (v0x08)**: Encrypt files to one or more X25519 public keys using ephemeral key exchange + HKDF + AES-256-GCM. Each recipient decrypts with their private identity key — no shared password needed.
-- **Identity key generation**: `generate-keypair` creates X25519 key pairs. Private keys can be passphrase-protected with Argon2id + AES-256-GCM.
+- **Identity key generation**: `dial` creates X25519 key pairs. Private keys can be passphrase-protected with Argon2id + AES-256-GCM.
+- **SSH key identity support**: Use Ed25519 SSH keys (`~/.ssh/id_ed25519`) directly as cipherlock identities via `--identity`.
 - **Password from env/fd**: `--password-env VAR` and `--password-fd N` let CI/CD pipelines supply passwords without interactive prompts or temporary files.
 - **Parallel batch processing**: `--jobs N` encrypts or decrypts multiple files concurrently using a worker pool.
 - **Defensive header bounds**: Salt, key length, chunk size, and recipient count are validated against strict upper limits to prevent OOM via maliciously crafted files.
+- **Time-gated encryption**: `gate` command embeds an expiry time. Decryption fails after expiration.
+- **Integrity & password verification**: `bombe` verifies file integrity; `click` verifies password correctness — both without writing output.
+- **Quiet mode**: `--quiet` suppresses progress bars/spinners and shows a compact `done`/`failed` per operation.
+- **Shred progress bar**: Visual pass counter and progress bar when shredding files.
+- **Key memory zeroing**: Derived keys and ECDH shared secrets are explicitly zeroed after use.
+- **Signal-safe in-place writes**: SIGINT during `--in-place` encrypt/decrypt leaves the original file intact.
+- **Recursive batch processing**: `--recursive` walks directories; `--include`/`--exclude` filter by glob patterns.
+- **Dry-run mode**: `--dry-run` validates inputs and flags without writing any output.
 
 ## Usage
 
@@ -113,11 +122,11 @@ Encrypt a file for multiple recipients. Each recipient can decrypt with their ow
 
 The primary password is prompted interactively (or provided via `--key-file` or `--gen-password`). Additional recipients are added with `--recipient`. All recipients can independently decrypt the file.
 
-### Re-key an encrypted file
+### Re-key an encrypted file (rotor)
 
 Change the password on an encrypted file without decrypting to disk:
 
-    cipherlock rekey document.pdf.encrypted
+    cipherlock rotor document.pdf.encrypted
 
 Prompts for the old and new passwords. All scripting-friendly flags are supported for both the old and new passwords:
 
@@ -132,11 +141,11 @@ Additional flags: `--output`, `--in-place`, `--force` (overwrite without prompt)
 
 ### Generate X25519 key pair
 
-    cipherlock generate-keypair --output-dir ~/.cipherlock
+    cipherlock dial --output-dir ~/.cipherlock
 
 Creates `cipherlock.identity` (private key, armored) and `cipherlock.pub` (public key, base64). Protect the identity with a passphrase:
 
-    cipherlock generate-keypair --passphrase-file ~/.secrets/identity-pass.txt
+    cipherlock dial --passphrase-file ~/.secrets/identity-pass.txt
 
 ### Asymmetric encryption (X25519 public key)
 
@@ -153,6 +162,10 @@ Multiple recipients:
     cipherlock decrypt --identity ~/.cipherlock/cipherlock.identity document.pdf.encrypted
 
 If the identity is passphrase-protected, you'll be prompted for the passphrase automatically.
+
+You can also use an Ed25519 SSH private key directly:
+
+    cipherlock decrypt --identity ~/.ssh/id_ed25519 document.pdf.encrypted
 
 ### Password from environment variable
 
@@ -193,15 +206,71 @@ The `--out-dir` flag controls where batch output goes:
 
     cipherlock shred sensitive.pdf secret.tmp
 
-Overwrites each file with one pass of random data and one pass of zeros, then removes it. Supports multiple paths in one command. Combine with `--quiet` to suppress progress.
+Overwrites each file with one pass of random data and one pass of zeros, then removes it. Shows a per-file progress bar with pass counter. Supports multiple paths in one command. Combine with `--quiet` to suppress the progress bar.
+
+### Time-gated encryption (gate)
+
+Encrypt a file that can only be decrypted before a deadline:
+
+    cipherlock gate encrypt --expires-in 24h secret.txt
+
+Decrypt (fails if the expiration time has passed):
+
+    cipherlock gate decrypt secret.cipherlock
+
+The expiration time is embedded in the encrypted metadata. After expiry, decryption reports an error and the output is removed.
+
+### Verify integrity (bombe)
+
+Full decryption check without writing output:
+
+    cipherlock bombe document.pdf.encrypted
+
+Returns exit code 0 if the file is intact and the password is correct.
+Differentiates between "wrong password" and "file is corrupted".
+
+### Verify password (click)
+
+Quick password verification without writing output:
+
+    cipherlock click document.pdf.encrypted
+
+Checks if the password is correct and the file format is valid. Same as `decrypt --check`.
+
+### Dry-run mode
+
+Validate inputs and flags without writing any output:
+
+    cipherlock encrypt --dry-run document.pdf
+    cipherlock decrypt --dry-run document.pdf.encrypted
+
+### Recursive batch processing
+
+Process all files in a directory tree:
+
+    cipherlock encrypt --recursive ./docs/
+    cipherlock decrypt --recursive ./docs/
+
+Filter with glob patterns:
+
+    cipherlock encrypt --recursive --include "*.txt" --exclude "*.tmp" ./docs/
+
+### Keep original on --in-place
+
+By default, `--in-place` shreds the original file after encrypting/decrypting:
+
+    cipherlock encrypt --in-place --keep document.pdf
+
+The `--keep` flag preserves the original (renamed to `.bak`).
+The `--backup` flag saves an extra `.bak` copy before the operation.
 
 ### Inspect encrypted file metadata
 
-    cipherlock info document.pdf.encrypted
+    cipherlock tumbler document.pdf.encrypted
 
 Displays the format version, whether the file is encrypted, and any cleartext metadata. For v0x06/v0x07 files with encrypted metadata:
 
-    cipherlock info --password "my-secret" document.pdf.encrypted
+    cipherlock tumbler --password "my-secret" document.pdf.encrypted
 
 Reveals the original filename, size, and modification time.
 
@@ -457,6 +526,16 @@ err := cipherlock.DecryptAsymmetric(&decrypted, encryptedReader, identity)
 
 The identity is matched against each recipient entry in the v0x08 header. Key exchange uses the ephemeral public key stored in the header.
 
+### Load an SSH key as cipherlock identity
+
+```go
+pemData, _ := os.ReadFile(os.ExpandEnv("$HOME/.ssh/id_ed25519"))
+identity, err := cipherlock.IdentityFromSSHPrivateKey(pemData)
+// identity can be used with DecryptAsymmetric, DecryptAsymmetricWithMeta, etc.
+```
+
+Only Ed25519 SSH keys are supported. RSA and ECDSA return `ErrUnsupportedKeyType`.
+
 ### Multi-recipient encryption
 
 Use `EncryptStreamMulti` (v0x07) for new code. It streams the plaintext
@@ -547,6 +626,10 @@ Default parameters (time=3, memory=64MB, threads=4) follow the OWASP Password St
 ### Authenticated encryption
 
 AES-256-GCM provides both confidentiality and integrity. Any tampering with the ciphertext is detected during decryption, and the operation fails with an authentication error before any data is written.
+
+### Key memory zeroing
+
+Derived keys, ECDH shared secrets, and wrapping keys are explicitly zeroed with `clear()` after the last cryptographic operation. This prevents secrets from lingering on the heap until garbage collection.
 
 ### Nonce generation
 

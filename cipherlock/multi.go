@@ -204,6 +204,7 @@ func EncryptMulti(dst io.Writer, src io.Reader, passwords [][]byte, config *Conf
 	if _, err := rand.Read(fileKey); err != nil {
 		return err
 	}
+	defer clear(fileKey)
 
 	fileBlock, err := aes.NewCipher(fileKey)
 	if err != nil {
@@ -301,6 +302,7 @@ func decryptMulti(dst io.Writer, remaining io.Reader, password []byte) error {
 	if fileKey == nil {
 		return ErrAuthFailed
 	}
+	defer clear(fileKey)
 
 	// Cap the v0x04 body to a sane upper bound to prevent OOM via a hostile
 	// header. v0x04 stores the entire ciphertext as a single GCM blob (no

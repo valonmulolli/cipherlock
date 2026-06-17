@@ -75,10 +75,13 @@ func IdentityFromSSHPrivateKey(pemData []byte) (*X25519Identity, error) {
 
 	seed := priv.Seed()
 	h := sha512.Sum512(seed)
+	clear(seed)
 	h[0] &= 248
 	h[31] &= 127
 	h[31] |= 64
-	return X25519IdentityFromPrivateKey(h[:32])
+	id, err := X25519IdentityFromPrivateKey(h[:32])
+	clear(h[:])
+	return id, err
 }
 
 // NewX25519Recipient creates a recipient from a raw 32-byte public key.
@@ -566,6 +569,7 @@ func SerializeX25519Identity(identity *X25519Identity, passphrase []byte) ([]byt
 
 		key := argon2.IDKey(passphrase, salt, identityArgon2Time, identityArgon2Memory,
 			identityArgon2Threads, identityKeyLen)
+		defer clear(key)
 
 		block, err := aes.NewCipher(key)
 		if err != nil {
@@ -624,6 +628,7 @@ func DeserializeX25519Identity(data, passphrase []byte) (*X25519Identity, error)
 
 		key := argon2.IDKey(passphrase, salt, identityArgon2Time, identityArgon2Memory,
 			identityArgon2Threads, identityKeyLen)
+		defer clear(key)
 
 		block, err := aes.NewCipher(key)
 		if err != nil {

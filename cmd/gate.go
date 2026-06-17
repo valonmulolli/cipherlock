@@ -138,10 +138,12 @@ the decryption will fail.`,
 
 		if inPlace {
 			if err := os.Rename(tmp, srcPath); err != nil {
+				os.Remove(tmp)
 				return err
 			}
 		} else {
 			if err := os.Rename(tmp, dest); err != nil {
+				os.Remove(tmp)
 				return err
 			}
 		}

@@ -79,6 +79,9 @@ By default, keys are written to the current directory as:
 		fmt.Fprintf(os.Stderr, "Identity (private key): %s\n", identityPath)
 
 		pubEncoded := base64.StdEncoding.EncodeToString(id.PublicKey)
+		if _, err := os.Stat(pubPath); err == nil {
+			return fmt.Errorf("output %q exists", pubPath)
+		}
 		if err := os.WriteFile(pubPath, []byte(pubEncoded+"\n"), 0644); err != nil {
 			return fmt.Errorf("writing public key: %w", err)
 		}

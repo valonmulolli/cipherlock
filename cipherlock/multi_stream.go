@@ -269,6 +269,7 @@ func EncryptStreamMulti(dst io.Writer, src io.Reader, passwords [][]byte, config
 	if _, err := io.ReadFull(rand.Reader, fileKey); err != nil {
 		return err
 	}
+	defer clear(fileKey)
 
 	entries := make([]recipientEntry, len(passwords))
 	for i, pwd := range passwords {
@@ -420,6 +421,7 @@ func DecryptStreamMulti(dst io.Writer, src io.Reader, password []byte) (*FileMet
 	if err != nil {
 		return nil, err
 	}
+	defer clear(fileKey)
 
 	var hasher hash.Hash
 	if h.Flags&flagChecksum != 0 {

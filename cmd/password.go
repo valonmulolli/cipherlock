@@ -38,6 +38,15 @@ func readPasswordFromFD(fdStr string) ([]byte, error) {
 		return nil, fmt.Errorf("invalid file descriptor number: %d", fdNum)
 	}
 
+	if fdNum == 0 {
+		reader := bufio.NewReader(os.NewFile(uintptr(fdNum), "password-fd"))
+		data, err := reader.ReadString('\n')
+		if err != nil && err != io.EOF {
+			return nil, fmt.Errorf("reading from file descriptor %d: %w", fdNum, err)
+		}
+		return []byte(strings.TrimRight(data, "\n\r")), nil
+	}
+
 	f := os.NewFile(uintptr(fdNum), "password-fd")
 	if f == nil {
 		return nil, fmt.Errorf("invalid file descriptor: %d", fdNum)

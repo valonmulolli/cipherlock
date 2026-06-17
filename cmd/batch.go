@@ -95,12 +95,6 @@ func processFilesInParallel(args []string, destFn func(src string, info os.FileI
 	for range jobs {
 		g.Go(func() error {
 			for job := range jobsCh {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				default:
-				}
-
 				err := processFn(job)
 				select {
 				case <-ctx.Done():

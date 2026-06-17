@@ -231,11 +231,11 @@ func decryptStreamV2Meta(r io.Reader, aesgcm cipher.AEAD) (*FileMeta, error) {
 // the v0x06 single-recipient streaming format. The header has already been written to
 // dst. hasher, if non-nil, is fed the plaintext and the digest is written as a trailer.
 func encryptStreamV2(dst io.Writer, src io.Reader, key []byte, chunkSize int, meta *FileMeta, hasher hash.Hash) error {
+	defer clear(key)
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return err
 	}
-	defer clear(key)
 	aesgcm, err := cipher.NewGCM(block)
 	if err != nil {
 		return err
