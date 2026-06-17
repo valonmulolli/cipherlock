@@ -274,6 +274,7 @@ func EncryptDirContext(ctx context.Context, source, dest string, password []byte
 	}()
 	select {
 	case <-ctx.Done():
+		<-done
 		return ctx.Err()
 	case err := <-done:
 		return err
@@ -293,6 +294,7 @@ func DecryptDirContext(ctx context.Context, source, dest string, password []byte
 	}()
 	select {
 	case <-ctx.Done():
+		<-done
 		return ctx.Err()
 	case err := <-done:
 		return err
