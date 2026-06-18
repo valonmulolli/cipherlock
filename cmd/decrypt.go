@@ -92,6 +92,7 @@ plaintext to stdout.`,
 				if e != nil {
 					return fmt.Errorf("parsing identity file: %w", e)
 				}
+				defer clear(passphrase)
 				identity, err = cipherlock.DeserializeX25519Identity(data, passphrase)
 			}
 			if err != nil && identity == nil {
@@ -184,6 +185,7 @@ plaintext to stdout.`,
 				return err
 			}
 			password = pwd
+			defer clear(password)
 		} else {
 			pwd, err := resolvePassword(passwordSource{
 				FD: decryptPasswordFD, Env: decryptPasswordEnv, KeyFile: decryptKeyFile,
@@ -193,6 +195,7 @@ plaintext to stdout.`,
 				return err
 			}
 			password = pwd
+			defer clear(password)
 		}
 
 		if len(args) == 1 && args[0] == "-" {

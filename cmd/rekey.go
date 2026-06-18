@@ -46,6 +46,7 @@ write to a different path (the original is preserved).`,
 				return err
 			}
 			oldPwd = pwd
+			defer clear(oldPwd)
 		} else {
 			pwd, err := resolvePassword(passwordSource{
 				FD: rekeyPasswordFD, Env: rekeyPasswordEnv, KeyFile: rekeyKeyFile,
@@ -55,6 +56,7 @@ write to a different path (the original is preserved).`,
 				return err
 			}
 			oldPwd = pwd
+			defer clear(oldPwd)
 		}
 
 		var newPwd []byte
@@ -67,6 +69,7 @@ write to a different path (the original is preserved).`,
 				return err
 			}
 			newPwd = pwd
+			defer clear(newPwd)
 		} else {
 			pwd, err := promptPassword("Enter new password: ", true)
 			if err != nil {
@@ -74,6 +77,7 @@ write to a different path (the original is preserved).`,
 			}
 			showStrength(pwd)
 			newPwd = pwd
+			defer clear(newPwd)
 		}
 
 		dest := rekeyOutput

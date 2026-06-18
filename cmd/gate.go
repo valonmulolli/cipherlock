@@ -59,6 +59,7 @@ Attempting to decrypt after the expiration will fail.`,
 		if err != nil {
 			return err
 		}
+		defer clear(password)
 		showStrength(password)
 
 		config := &cipherlock.Config{
@@ -112,6 +113,7 @@ the decryption will fail.`,
 		if err != nil {
 			return err
 		}
+		defer clear(password)
 
 		dest := decryptOutput
 		if dest == "" {

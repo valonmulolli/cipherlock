@@ -66,7 +66,7 @@ func ShredWith(path string, fn ShredProgressFn) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 	remaining = size
 	for remaining > 0 {
 		writeLen := int64(len(zeros))

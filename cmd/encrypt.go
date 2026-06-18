@@ -73,6 +73,7 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			if err != nil {
 				return err
 			}
+			defer clear(pwd)
 			passwords = [][]byte{pwd}
 		} else if len(recipientPwds) > 0 {
 			for _, r := range recipientPwds {
@@ -85,6 +86,7 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			if err != nil {
 				return err
 			}
+			defer clear(primary)
 			showStrength(primary)
 			passwords = append([][]byte{primary}, passwords...)
 		} else {
@@ -95,6 +97,7 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 			if err != nil {
 				return err
 			}
+			defer clear(primary)
 			showStrength(primary)
 			passwords = [][]byte{primary}
 		}
@@ -450,6 +453,7 @@ func generatePassword(length int) ([]byte, error) {
 	}
 	dst := make([]byte, hex.EncodedLen(len(b)))
 	hex.Encode(dst, b)
+	clear(b)
 	return dst, nil
 }
 
@@ -470,13 +474,17 @@ func promptPassword(prompt string, confirm bool) ([]byte, error) {
 		p2, err := term.ReadPassword(int(os.Stdin.Fd()))
 		fmt.Fprintln(os.Stderr)
 		if err != nil {
+			clear(p1)
 			return nil, err
 		}
 
 		if string(p1) == string(p2) {
+			clear(p2)
 			return p1, nil
 		}
 
+		clear(p1)
+		clear(p2)
 		fmt.Fprintln(os.Stderr, "Passwords do not match. Try again.")
 	}
 

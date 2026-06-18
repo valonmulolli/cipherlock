@@ -53,12 +53,12 @@ func estimateStrength(pwd []byte) strength {
 		}
 	}
 	defer clear(lower)
-	s := string(lower)
-	runes := []rune(s)
 
-	if commonPasswords[s] {
+	if commonPasswords[string(lower)] {
 		return veryWeak
 	}
+
+	runes := []rune(string(lower))
 	if len(runes) < 6 {
 		return veryWeak
 	}

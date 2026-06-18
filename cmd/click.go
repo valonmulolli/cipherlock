@@ -40,6 +40,7 @@ This is the same as 'decrypt --check'.`,
 				return err
 			}
 			password = pwd
+			defer clear(password)
 		} else {
 			pwd, err := resolvePassword(passwordSource{
 				FD: decryptPasswordFD, Env: decryptPasswordEnv, KeyFile: decryptKeyFile,
@@ -49,6 +50,7 @@ This is the same as 'decrypt --check'.`,
 				return err
 			}
 			password = pwd
+			defer clear(password)
 		}
 
 		stopKDF := showKDF()

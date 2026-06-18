@@ -3,7 +3,6 @@ package cipherlock
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -33,16 +32,35 @@ func newSafeWriter(dst io.Writer) *safeWriter {
 }
 
 func (sw *safeWriter) Write(p []byte) (int, error) {
-	return sw.buf.Write(p)
+	if sw.direct {
+		return sw.dst.Write(p)
+	}
+	n, err := sw.buf.Write(p)
+	if err != nil {
+		return n, err
+	}
+	if sw.buf.Len() >= sw.threshold {
+		if _, err := sw.buf.WriteTo(sw.dst); err != nil {
+			return n, err
+		}
+	}
+	return n, nil
 }
 
 func (sw *safeWriter) Commit() error {
 	if sw.buf.Len() == 0 {
+		sw.direct = true
 		return nil
 	}
-	_, err := sw.buf.WriteTo(sw.dst)
+	n, err := sw.buf.WriteTo(sw.dst)
 	sw.direct = true
-	return err
+	if err != nil {
+		return err
+	}
+	if n < int64(sw.buf.Len()) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 func (sw *safeWriter) Discard() {
@@ -143,7 +161,7 @@ func ReKey(dst io.Writer, src io.Reader, oldPassword, newPassword []byte, config
 
 		err1 := <-errCh
 		err2 := <-errCh
-		if err1 != nil && !errors.Is(err1, io.ErrClosedPipe) {
+		if err1 != nil {
 			sw.Discard()
 			return err1
 		}

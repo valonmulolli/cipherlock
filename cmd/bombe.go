@@ -30,6 +30,7 @@ the file has been corrupted or the password is wrong.`,
 				return err
 			}
 			password = pwd
+			defer clear(password)
 		} else {
 			pwd, err := resolvePassword(passwordSource{
 				FD: decryptPasswordFD, Env: decryptPasswordEnv, KeyFile: decryptKeyFile,
@@ -39,6 +40,7 @@ the file has been corrupted or the password is wrong.`,
 				return err
 			}
 			password = pwd
+			defer clear(password)
 		}
 
 		srcFile, err := os.Open(srcPath)

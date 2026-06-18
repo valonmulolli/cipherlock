@@ -57,6 +57,11 @@ By default, keys are written to the current directory as:
 			passphrase = p
 		}
 
+		pubEncoded := base64.StdEncoding.EncodeToString(id.PublicKey)
+		if _, err := os.Stat(pubPath); err == nil {
+			return fmt.Errorf("output %q exists", pubPath)
+		}
+
 		serialized, err := cipherlock.SerializeX25519Identity(id, passphrase)
 		if err != nil {
 			return fmt.Errorf("serializing identity: %w", err)
@@ -76,15 +81,11 @@ By default, keys are written to the current directory as:
 		if err := f.Close(); err != nil {
 			return fmt.Errorf("writing identity: %w", err)
 		}
-		fmt.Fprintf(os.Stderr, "Identity (private key): %s\n", identityPath)
 
-		pubEncoded := base64.StdEncoding.EncodeToString(id.PublicKey)
-		if _, err := os.Stat(pubPath); err == nil {
-			return fmt.Errorf("output %q exists", pubPath)
-		}
 		if err := os.WriteFile(pubPath, []byte(pubEncoded+"\n"), 0644); err != nil {
 			return fmt.Errorf("writing public key: %w", err)
 		}
+		fmt.Fprintf(os.Stderr, "Identity (private key): %s\n", identityPath)
 		fmt.Fprintf(os.Stderr, "Public key: %s\n", pubPath)
 		return nil
 	},
