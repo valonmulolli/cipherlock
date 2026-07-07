@@ -158,7 +158,7 @@ plaintext to stdout.`,
 					}
 				}
 
-				if !forceOverwrite && !inPlace {
+				if !forceOverwrite && !inPlace && dest != "-" {
 					if _, err := os.Stat(dest); err == nil {
 						return fmt.Errorf("output %q exists; use --force to overwrite", dest)
 					}
@@ -224,7 +224,7 @@ plaintext to stdout.`,
 						dest = defaultDecryptPath(src)
 					}
 				}
-				if !forceOverwrite && !inPlace {
+				if !forceOverwrite && !inPlace && dest != "-" {
 					if _, err := os.Stat(dest); err == nil {
 						return "", fmt.Errorf("output %q exists; use --force to overwrite", dest)
 					}
@@ -265,7 +265,7 @@ plaintext to stdout.`,
 				}
 			}
 
-			if !forceOverwrite && !inPlace {
+			if !forceOverwrite && !inPlace && dest != "-" {
 				if _, err := os.Stat(dest); err == nil {
 					return fmt.Errorf("output %q exists; use --force to overwrite", dest)
 				}
@@ -309,13 +309,10 @@ func decryptStdin(password []byte) error {
 	out := decryptOutput
 	stopKDF := showKDF()
 
-	if out == "" {
+	if out == "" || out == "-" {
 		err := decryptFromReader(os.Stdout, os.Stdin, password)
 		stopKDF()
-		if err != nil {
-			return err
-		}
-		return nil
+		return err
 	}
 
 	f, err := os.Create(out)
@@ -326,10 +323,7 @@ func decryptStdin(password []byte) error {
 
 	err = decryptFromReader(f, os.Stdin, password)
 	stopKDF()
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
 func decryptDirSource(srcPath string, info os.FileInfo, password []byte) error {
@@ -393,6 +387,22 @@ func decryptFile(srcPath, dstPath string, info os.FileInfo, password []byte) (er
 			}
 			return err
 		})
+	}
+
+	if dstPath == "-" {
+		srcFile, srcErr := os.Open(srcPath)
+		if srcErr != nil {
+			return srcErr
+		}
+		defer srcFile.Close()
+		srcReader := progressReader(srcFile, info.Size(), "decrypting")
+		stopKDF := showKDF()
+		err = decryptFromReader(os.Stdout, srcReader, password)
+		stopKDF()
+		if isAuthError(err) {
+			return errors.New("decryption failed: wrong password or corrupted data")
+		}
+		return err
 	}
 
 	destFile, err := os.Create(dstPath)
@@ -507,13 +517,21 @@ func decryptAsymmetricFile(dstPath string, srcPath string, info os.FileInfo, ide
 		})
 	}
 
+	if dstPath == "-" {
+		return decryptAsymmetricFromReader(os.Stdout, reader, identity)
+	}
+
 	destFile, err := os.Create(dstPath)
 	if err != nil {
 		return err
 	}
 	defer destFile.Close()
 
-	return decryptAsymmetricFromReader(destFile, reader, identity)
+	err = decryptAsymmetricFromReader(destFile, reader, identity)
+	if err != nil {
+		os.Remove(dstPath) //nolint:errcheck
+	}
+	return err
 }
 
 func restoreMeta(encPath, decPath string, password []byte, userSetOutput bool) {

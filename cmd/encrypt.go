@@ -217,7 +217,7 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 						dest = src + ".encrypted"
 					}
 				}
-				if !forceEncrypt && !inPlace {
+				if !forceEncrypt && !inPlace && dest != "-" {
 					if _, err := os.Stat(dest); err == nil {
 						return "", fmt.Errorf("output %q exists; use --force to overwrite", dest)
 					}
@@ -250,7 +250,7 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 				}
 			}
 
-			if !forceEncrypt && !inPlace {
+			if !forceEncrypt && !inPlace && dest != "-" {
 				if _, err := os.Stat(dest); err == nil {
 					return fmt.Errorf("output %q exists; use --force to overwrite", dest)
 				}
@@ -296,7 +296,7 @@ func encryptStdin(passwords [][]byte, asymmetricRecipients []*cipherlock.X25519R
 	out := outputPath
 	stopKDF := showKDF()
 
-	if out == "" {
+	if out == "" || out == "-" {
 		err := encryptToWriter(os.Stdout, os.Stdin, passwords, asymmetricRecipients, config)
 		stopKDF()
 		return err
@@ -359,6 +359,12 @@ func encryptFile(srcPath, dstPath string, info os.FileInfo, passwords [][]byte, 
 	srcReader := progressReader(srcFile, info.Size(), "encrypting")
 	stopKDF := showKDF()
 
+	if dstPath == "-" {
+		err = encryptToWriter(os.Stdout, srcReader, passwords, asymmetricRecipients, &cfg)
+		stopKDF()
+		return err
+	}
+
 	destFile, err := os.Create(dstPath)
 	if err != nil {
 		return err
@@ -368,6 +374,9 @@ func encryptFile(srcPath, dstPath string, info os.FileInfo, passwords [][]byte, 
 	stopKDF()
 	if closeErr := destFile.Close(); closeErr != nil && err == nil {
 		err = closeErr
+	}
+	if err != nil {
+		os.Remove(dstPath) //nolint:errcheck
 	}
 	return err
 }

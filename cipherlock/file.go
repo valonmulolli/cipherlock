@@ -91,7 +91,9 @@ func DecryptFileWithMeta(source, dest string, password []byte) (*FileMeta, error
 	return DecryptWithMeta(destFile, srcFile, password)
 }
 
-// IsEncrypted reports whether the file at path starts with the cipherlock magic bytes.
+// IsEncrypted reports whether the file at path is a cipherlock file.
+// It detects both the binary format (CV2\0 magic bytes) and the
+// ASCII-armored format (-----BEGIN CIPHERLOCK----- header).
 // It returns false without error if the file cannot be read or is too short.
 func IsEncrypted(path string) (bool, error) {
 	f, err := os.Open(path)
@@ -107,7 +109,22 @@ func IsEncrypted(path string) (bool, error) {
 		}
 		return false, err
 	}
-	return buf == magic, nil
+	if buf == magic {
+		return true, nil
+	}
+
+	if _, err := f.Seek(0, 0); err != nil {
+		return false, nil
+	}
+	var hdr [len(armorHeader)]byte
+	n, err := io.ReadFull(f, hdr[:])
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return false, nil
+	}
+	if n >= len(armorHeader) && string(hdr[:]) == armorHeader {
+		return true, nil
+	}
+	return false, nil
 }
 
 func defaultDecryptPath(source string) string {

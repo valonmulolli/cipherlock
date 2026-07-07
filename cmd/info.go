@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -40,11 +42,49 @@ modification time.`,
 		}
 		defer f.Close()
 
-		meta, err := cipherlock.ReadStreamMeta(f)
+		isArmored, armoredReader, aErr := cipherlock.IsArmoredReader(f)
+		var r io.Reader = f
+		switch {
+		case aErr != nil:
+			r = f
+		case isArmored:
+			ur, uErr := cipherlock.NewUnarmorReader(armoredReader)
+			if uErr == nil {
+				r = ur
+			}
+		default:
+			r = armoredReader
+		}
+
+		meta, err := cipherlock.ReadStreamMeta(r)
 		if err != nil {
 			if errors.Is(err, cipherlock.ErrEncryptedMeta) && infoPassword != "" {
-				f.Seek(0, 0)
-				meta, err = cipherlock.ReadStreamMetaWithPassword(f, []byte(infoPassword))
+				meta, err = func() (*cipherlock.FileMeta, error) {
+					f2, e := os.Open(path)
+					if e != nil {
+						return nil, e
+					}
+					defer f2.Close()
+					r2 := io.Reader(f2)
+					ok2, ar2, pe := cipherlock.IsArmoredReader(f2)
+					switch {
+					case pe != nil:
+						r2 = f2
+					case ok2:
+						ur2, ue := cipherlock.NewUnarmorReader(ar2)
+						if ue != nil {
+							return nil, ue
+						}
+						r2 = ur2
+					default:
+						r2 = ar2
+					}
+					data, e := io.ReadAll(r2)
+					if e != nil {
+						return nil, e
+					}
+					return cipherlock.ReadStreamMetaWithPassword(bytes.NewReader(data), []byte(infoPassword))
+				}()
 				if err != nil {
 					return fmt.Errorf("reading metadata: %w", err)
 				}
