@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -15,16 +16,18 @@ import (
 )
 
 var (
-	decryptOutput        string
-	decryptKeyFile       string
-	decryptOutDir        string
-	checkOnly            bool
-	forceOverwrite       bool
-	decryptDirMode       bool
-	identityFile         string
-	decryptPasswordFD    string
-	decryptPasswordEnv   string
-	decryptPasswordStdin bool
+	decryptOutput          string
+	decryptKeyFile         string
+	decryptOutDir          string
+	checkOnly              bool
+	forceOverwrite         bool
+	decryptDirMode         bool
+	identityFile           string
+	sshPrivKeyFile         string
+	identityPassphraseFile string
+	decryptPasswordFD      string
+	decryptPasswordEnv     string
+	decryptPasswordStdin   bool
 )
 
 var decryptCmd = &cobra.Command{
@@ -88,18 +91,27 @@ plaintext to stdout.`,
 			}
 			identity, err = cipherlock.DeserializeX25519Identity(data, nil)
 			if errors.Is(err, cipherlock.ErrIdentityNeedsPassphrase) {
-				passphrase, e := readIdentityPassphrase()
-				if e != nil {
-					return fmt.Errorf("parsing identity file: %w", e)
+				passphrase, pe := resolvePassphrase()
+				if pe != nil {
+					return fmt.Errorf("parsing identity file: %w", pe)
 				}
-				defer clear(passphrase)
 				identity, err = cipherlock.DeserializeX25519Identity(data, passphrase)
+				clear(passphrase)
 			}
 			if err != nil && identity == nil {
 				identity, err = cipherlock.IdentityFromSSHPrivateKey(data)
 			}
 			if err != nil {
 				return fmt.Errorf("parsing identity file: %w", err)
+			}
+		} else if sshPrivKeyFile != "" {
+			data, err := os.ReadFile(sshPrivKeyFile)
+			if err != nil {
+				return fmt.Errorf("reading SSH private key: %w", err)
+			}
+			identity, err = cipherlock.IdentityFromSSHPrivateKey(data)
+			if err != nil {
+				return fmt.Errorf("parsing SSH private key: %w", err)
 			}
 		}
 
@@ -604,6 +616,17 @@ func readIdentityPassphrase() ([]byte, error) {
 	return passphrase, nil
 }
 
+func resolvePassphrase() ([]byte, error) {
+	if identityPassphraseFile != "" {
+		pdata, err := os.ReadFile(identityPassphraseFile)
+		if err != nil {
+			return nil, fmt.Errorf("reading passphrase file: %w", err)
+		}
+		return bytes.TrimRight(pdata, "\n\r\t "), nil
+	}
+	return readIdentityPassphrase()
+}
+
 func init() {
 	rootCmd.AddCommand(decryptCmd)
 	decryptCmd.Flags().StringVarP(&decryptOutput, "output", "o", "", "output file path")
@@ -615,6 +638,8 @@ func init() {
 	decryptCmd.Flags().BoolVar(&forceOverwrite, "force", false, "overwrite existing output files without prompting")
 	decryptCmd.Flags().BoolVar(&decryptDirMode, "dir", false, "decrypt directory archive and extract")
 	decryptCmd.Flags().StringVar(&identityFile, "identity", "", "path to X25519 identity (private key) file for asymmetric decryption")
+	decryptCmd.Flags().StringVar(&sshPrivKeyFile, "ssh-privkey", "", "path to Ed25519 SSH private key for asymmetric decryption")
+	decryptCmd.Flags().StringVar(&identityPassphraseFile, "passphrase-file", "", "read identity passphrase from file instead of prompting")
 	decryptCmd.Flags().StringVar(&decryptPasswordEnv, "password-env", "", "read password from environment variable")
 	decryptCmd.Flags().StringVar(&decryptPasswordFD, "password-fd", "", "read password from file descriptor number (e.g. 0 for stdin pipe)")
 	decryptCmd.Flags().BoolVar(&decryptPasswordStdin, "password-stdin", false, "read password from stdin")

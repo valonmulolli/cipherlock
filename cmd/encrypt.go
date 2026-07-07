@@ -34,6 +34,9 @@ var (
 	saveKeychain     bool
 	forceEncrypt     bool
 	jobs             int
+	argonTime        uint32
+	argonMemory      uint32
+	argonThreads     uint8
 )
 
 var encryptCmd = &cobra.Command{
@@ -146,6 +149,16 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 				return err
 			}
 			config.ApplyProfile(profile)
+		}
+
+		if argonTime > 0 {
+			config.Time = argonTime
+		}
+		if argonMemory > 0 {
+			config.Memory = argonMemory
+		}
+		if argonThreads > 0 {
+			config.Threads = argonThreads
 		}
 
 		if err := validateEncryptFlags(args, outputPath, outDir, inPlace); err != nil {
@@ -433,6 +446,9 @@ func init() {
 	encryptCmd.Flags().StringVar(&passwordFD, "password-fd", "", "read password from file descriptor number (e.g. 0 for stdin pipe)")
 	encryptCmd.Flags().BoolVar(&passwordStdin, "password-stdin", false, "read password from stdin")
 	encryptCmd.Flags().IntVarP(&jobs, "jobs", "j", 0, "number of parallel jobs (default: sequential)")
+	encryptCmd.Flags().Uint32Var(&argonTime, "time", 0, "Argon2id time parameter (overrides profile)")
+	encryptCmd.Flags().Uint32Var(&argonMemory, "memory", 0, "Argon2id memory in KB (overrides profile)")
+	encryptCmd.Flags().Uint8Var(&argonThreads, "threads", 0, "Argon2id parallelism (overrides profile)")
 	encryptCmd.RegisterFlagCompletionFunc("profile", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
 		return profileNames(), cobra.ShellCompDirectiveDefault
 	})
