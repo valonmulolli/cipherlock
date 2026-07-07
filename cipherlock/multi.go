@@ -240,15 +240,18 @@ func EncryptMulti(dst io.Writer, src io.Reader, passwords [][]byte, config *Conf
 		key := argon2.IDKey(pwd, salt, config.Time, config.Memory, config.Threads, config.KeyLen)
 		block, err := aes.NewCipher(key)
 		if err != nil {
+			clear(key)
 			return err
 		}
 		gcm, err := cipher.NewGCM(block)
 		if err != nil {
+			clear(key)
 			return err
 		}
 
 		keyNonce := make([]byte, nonceSize)
 		if _, err := io.ReadFull(rand.Reader, keyNonce); err != nil {
+			clear(key)
 			return err
 		}
 
@@ -284,17 +287,21 @@ func decryptMulti(dst io.Writer, remaining io.Reader, password []byte) error {
 		key := argon2.IDKey(password, entry.Salt, entry.Time, entry.Memory, entry.Threads, entry.KeyLen)
 		block, aesErr := aes.NewCipher(key)
 		if aesErr != nil {
+			clear(key)
 			continue
 		}
 		gcm, aesErr := cipher.NewGCM(block)
 		if aesErr != nil {
+			clear(key)
 			continue
 		}
 
 		decrypted, aesErr := gcm.Open(nil, entry.KeyNonce[:], entry.SealedKey, nil)
 		if aesErr != nil {
+			clear(key)
 			continue
 		}
+		clear(key)
 		fileKey = decrypted
 		break
 	}

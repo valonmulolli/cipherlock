@@ -79,9 +79,10 @@ func IdentityFromSSHPrivateKey(pemData []byte) (*X25519Identity, error) {
 	h[0] &= 248
 	h[31] &= 127
 	h[31] |= 64
-	id, err := X25519IdentityFromPrivateKey(h[:32])
+	privKey := make([]byte, x25519PrivateKeySize)
+	copy(privKey, h[:32])
 	clear(h[:])
-	return id, err
+	return X25519IdentityFromPrivateKey(privKey)
 }
 
 // NewX25519Recipient creates a recipient from a raw 32-byte public key.
@@ -352,11 +353,11 @@ func EncryptAsymmetric(dst io.Writer, src io.Reader, recipients []*X25519Recipie
 // encryptAsymmetricBody writes the optional metadata chunk and data chunks to dst,
 // all encrypted with fileKey.
 func encryptAsymmetricBody(dst io.Writer, src io.Reader, fileKey []byte, chunkSize int, meta *FileMeta, hasher hash.Hash) error {
+	defer clear(fileKey)
 	block, err := aes.NewCipher(fileKey)
 	if err != nil {
 		return err
 	}
-	defer clear(fileKey)
 	aesgcm, err := cipher.NewGCM(block)
 	if err != nil {
 		return err
@@ -474,11 +475,11 @@ func tryUnsealAsymmetric(entries []asymmetricRecipientEntry, identity *X25519Ide
 }
 
 func decryptAsymmetricBody(dst io.Writer, src io.Reader, fileKey []byte, flags byte) (*FileMeta, error) {
+	defer clear(fileKey)
 	block, err := aes.NewCipher(fileKey)
 	if err != nil {
 		return nil, err
 	}
-	defer clear(fileKey)
 	aesgcm, err := cipher.NewGCM(block)
 	if err != nil {
 		return nil, err

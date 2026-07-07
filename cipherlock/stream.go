@@ -428,11 +428,11 @@ func decryptStream(dst io.Writer, src io.Reader, password []byte) (*FileMeta, er
 		return nil, err
 	}
 
+	defer clear(key)
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
 	}
-	defer clear(key)
 
 	aesgcm, err := cipher.NewGCM(block)
 	if err != nil {

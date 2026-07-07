@@ -303,11 +303,11 @@ func decryptStreamV2(dst io.Writer, src io.Reader, password []byte) (*FileMeta, 
 		return nil, err
 	}
 
+	defer clear(key)
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
 	}
-	defer clear(key)
 	aesgcm, err := cipher.NewGCM(block)
 	if err != nil {
 		return nil, err
@@ -453,6 +453,7 @@ func readStreamV2MetaOnly(r io.Reader, password []byte) (*FileMeta, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer clear(key)
 	if sh.Flags&flagHasMetadata == 0 {
 		return nil, nil
 	}

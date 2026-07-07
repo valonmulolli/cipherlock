@@ -281,15 +281,18 @@ func EncryptStreamMulti(dst io.Writer, src io.Reader, passwords [][]byte, config
 		key := argon2.IDKey(pwd, salt, config.Time, config.Memory, config.Threads, config.KeyLen)
 		block, err := aes.NewCipher(key)
 		if err != nil {
+			clear(key)
 			return err
 		}
 		gcm, err := cipher.NewGCM(block)
 		if err != nil {
+			clear(key)
 			return err
 		}
 
 		keyNonce := make([]byte, nonceSize)
 		if _, err := io.ReadFull(rand.Reader, keyNonce); err != nil {
+			clear(key)
 			return err
 		}
 
@@ -493,6 +496,7 @@ func readStreamMultiMeta(r io.Reader, password []byte) (*FileMeta, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer clear(fileKey)
 
 	block, err := aes.NewCipher(fileKey)
 	if err != nil {

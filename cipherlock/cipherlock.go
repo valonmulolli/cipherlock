@@ -105,12 +105,12 @@ func decryptV2V3(dst io.Writer, src io.Reader, password []byte) error {
 	}
 
 	key := argon2.IDKey(password, h.Salt, config.Time, config.Memory, config.Threads, config.KeyLen)
+	defer clear(key)
 
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return err
 	}
-	defer clear(key)
 
 	aesgcm, err := cipher.NewGCM(block)
 	if err != nil {
