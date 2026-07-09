@@ -65,7 +65,7 @@ modification time.`,
 						return nil, e
 					}
 					defer f2.Close()
-					r2 := io.Reader(f2)
+					var r2 io.Reader
 					ok2, ar2, pe := cipherlock.IsArmoredReader(f2)
 					switch {
 					case pe != nil:
