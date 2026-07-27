@@ -315,6 +315,10 @@ func EncryptStreamMulti(dst io.Writer, src io.Reader, passwords [][]byte, config
 	if config.FileMeta != nil {
 		flags |= flagHasMetadata
 	}
+	if config.Compression {
+		flags |= flagCompressed
+		src = compressReader(src)
+	}
 
 	if err := writeStreamMultiHeader(dst, entries, flags); err != nil {
 		return err
@@ -357,6 +361,11 @@ func decryptStreamMultiBody(dst io.Writer, src io.Reader, fileKey []byte, flags 
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	var decompress func()
+	if flags&flagCompressed != 0 {
+		dst, decompress = decompressWriter(dst)
 	}
 
 	for {
@@ -403,6 +412,10 @@ func decryptStreamMultiBody(dst io.Writer, src io.Reader, fileKey []byte, flags 
 		if !bytes.Equal(expected[:], actual) {
 			return nil, ErrChecksumMismatch
 		}
+	}
+
+	if decompress != nil {
+		decompress()
 	}
 
 	return meta, nil
