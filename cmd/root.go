@@ -362,6 +362,7 @@ func init() {
 		printCmd("show-profile <name>", "Display a configuration profile")
 
 		printSection("Utility:")
+		printCmd("bench", "Benchmark Argon2id performance")
 		printCmd("shred <path>", "Securely delete files")
 		printCmd("completion", "Generate shell completions")
 		printCmd("version", "Print version information")

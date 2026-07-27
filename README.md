@@ -27,6 +27,7 @@ cipherlock is a Go library and CLI tool for encrypting files and directories usi
 - **V1 backward compatibility**: Decrypt files created with the original PBKDF2+SHA1 format.
 - **Progress indication**: Visual progress bar for large file operations.
 - **zstd compression** (`--compress`): Compress plaintext with zstd before encryption. Reduces ciphertext size for text-heavy payloads (JSON, logs, source code) by 5–10×. Auto-detected on decrypt — no special flag needed.
+- **Auto-tuning benchmark** (`bench`): Run Argon2id benchmarks across a range of memory and time settings to find the strongest KDF parameters for your hardware. Save with `--save` and use as a profile.
 - **Checksum verification**: Embedded SHA-256 checksum of plaintext. Verified automatically on decrypt when present.
 - **Re-key files**: Change the password on an encrypted file without decrypting to disk.
 - **Multi-recipient encryption**: Encrypt once for multiple passwords. Each recipient uses their own password to decrypt.
@@ -333,6 +334,32 @@ List and remove profiles:
     cipherlock config remove-profile high
 
 Profiles are stored at `~/.config/cipherlock/profiles.json`.
+
+### Auto-tune KDF parameters (bench)
+
+Find the strongest Argon2id parameters for your hardware:
+
+    cipherlock bench
+
+Benchmarks 12 combinations (32–256 MB, time 1–3) and recommends the
+best fit within the default 1-second target:
+
+```
+  Memory  Time=1  Time=2  Time=3
+  32 MB    287 ms   530 ms   790 ms
+  64 MB    512 ms   987 ms   1.5 s
+  128 MB   1.1 s    2.1 s    3.2 s    ← ⭐
+  256 MB   2.2 s    4.3 s    6.5 s
+```
+
+Custom target duration:
+
+    cipherlock bench --target 3s
+
+Save the recommended profile automatically:
+
+    cipherlock bench --save my-profile
+    cipherlock encrypt --profile my-profile document.pdf
 
 ### Shell completion
 
