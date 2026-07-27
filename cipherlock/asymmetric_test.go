@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGenerateX25519Keypair(t *testing.T) {
@@ -281,5 +282,103 @@ func TestEncryptAsymmetricLarge(t *testing.T) {
 
 	if !bytes.Equal(plaintext, decrypted.Bytes()) {
 		t.Fatal("round-trip mismatch for large data")
+	}
+}
+
+func TestEncryptDecryptAsymmetricCompression(t *testing.T) {
+	id, err := GenerateX25519Keypair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := NewX25519Recipient(id.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plaintext := bytes.Repeat([]byte("asymmetric compressible data! "), 2048)
+	cfg := &Config{Compression: true}
+
+	var encrypted bytes.Buffer
+	if err := EncryptAsymmetric(&encrypted, bytes.NewReader(plaintext), []*X25519Recipient{rec}, cfg); err != nil {
+		t.Fatalf("EncryptAsymmetric with compression: %v", err)
+	}
+
+	// Verify flagCompressed is set in the header
+	encBytes := encrypted.Bytes()
+	if len(encBytes) < 7 {
+		t.Fatal("output too short")
+	}
+	// Flags byte at offset 5 (magic 4 + version 1 + flags 1)
+	if encBytes[5]&flagCompressed == 0 {
+		t.Fatal("flagCompressed not set in asymmetric header")
+	}
+
+	var decrypted bytes.Buffer
+	if err := DecryptAsymmetric(&decrypted, &encrypted, id); err != nil {
+		t.Fatalf("DecryptAsymmetric with compression: %v", err)
+	}
+	if !bytes.Equal(plaintext, decrypted.Bytes()) {
+		t.Fatal("compressed asymmetric round-trip mismatch")
+	}
+}
+
+func TestEncryptDecryptAsymmetricCompressionWithChecksum(t *testing.T) {
+	id, err := GenerateX25519Keypair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := NewX25519Recipient(id.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plaintext := []byte("asymmetric compressed with checksum")
+	cfg := &Config{Compression: true, Checksum: true}
+
+	var encrypted bytes.Buffer
+	if err := EncryptAsymmetric(&encrypted, bytes.NewReader(plaintext), []*X25519Recipient{rec}, cfg); err != nil {
+		t.Fatalf("EncryptAsymmetric: %v", err)
+	}
+
+	var decrypted bytes.Buffer
+	if err := DecryptAsymmetric(&decrypted, &encrypted, id); err != nil {
+		t.Fatalf("DecryptAsymmetric: %v", err)
+	}
+	if !bytes.Equal(plaintext, decrypted.Bytes()) {
+		t.Fatal("data mismatch")
+	}
+}
+
+func TestEncryptDecryptAsymmetricCompressionWithMeta(t *testing.T) {
+	id, err := GenerateX25519Keypair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := NewX25519Recipient(id.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plaintext := []byte("asymmetric compressed with meta")
+	cfg := &Config{
+		Compression: true,
+		FileMeta: &FileMeta{
+			Name:    "crypto.bin",
+			Size:    int64(len(plaintext)),
+			ModTime: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+		},
+	}
+
+	var encrypted bytes.Buffer
+	if err := EncryptAsymmetric(&encrypted, bytes.NewReader(plaintext), []*X25519Recipient{rec}, cfg); err != nil {
+		t.Fatalf("EncryptAsymmetric: %v", err)
+	}
+
+	var decrypted bytes.Buffer
+	if err := DecryptAsymmetric(&decrypted, &encrypted, id); err != nil {
+		t.Fatalf("DecryptAsymmetric: %v", err)
+	}
+	if !bytes.Equal(plaintext, decrypted.Bytes()) {
+		t.Fatal("data mismatch")
 	}
 }

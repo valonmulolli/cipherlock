@@ -279,3 +279,96 @@ func TestReKeyStreamV2WrongOldPassword(t *testing.T) {
 		t.Fatalf("expected ErrAuthFailed, got %v", err)
 	}
 }
+
+func TestEncryptDecryptStreamMultiCompression(t *testing.T) {
+	plaintext := bytes.Repeat([]byte("compressible multi! "), 4096)
+	passwords := [][]byte{[]byte("alice"), []byte("bob")}
+
+	cfg := fastConfig()
+	cfg.Compression = true
+
+	var enc bytes.Buffer
+	if err := EncryptStreamMulti(&enc, bytes.NewReader(plaintext), passwords, cfg); err != nil {
+		t.Fatalf("EncryptStreamMulti with compression: %v", err)
+	}
+
+	// flagCompressed should be set in the header
+	encBytes := enc.Bytes()
+	if len(encBytes) < 7 {
+		t.Fatal("output too short")
+	}
+	// The flags byte is at offset 5 for v0x07 header (magic 4 + version 1 + flags 1)
+	if encBytes[5]&flagCompressed == 0 {
+		t.Fatal("flagCompressed not set in multi-recipient header")
+	}
+
+	for _, pwd := range passwords {
+		var dec bytes.Buffer
+		if _, err := DecryptStreamMultiFromReader(&dec, bytes.NewReader(encBytes), pwd); err != nil {
+			t.Fatalf("decrypt with %q: %v", string(pwd), err)
+		}
+		if !bytes.Equal(dec.Bytes(), plaintext) {
+			t.Errorf("decrypt with %q: data mismatch", string(pwd))
+		}
+	}
+}
+
+func TestEncryptDecryptStreamMultiCompressionWithMeta(t *testing.T) {
+	plaintext := []byte("multi compressed with meta")
+	passwords := [][]byte{[]byte("a"), []byte("b")}
+
+	cfg := fastConfig()
+	cfg.Compression = true
+	cfg.FileMeta = &FileMeta{
+		Name:    "team-secret.bin",
+		Size:    int64(len(plaintext)),
+		ModTime: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+	}
+
+	var enc bytes.Buffer
+	if err := EncryptStreamMulti(&enc, bytes.NewReader(plaintext), passwords, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	if bytes.Contains(enc.Bytes(), []byte("team-secret.bin")) {
+		t.Fatal("filename leaked in cleartext")
+	}
+
+	for _, pwd := range passwords {
+		var dec bytes.Buffer
+		meta, err := DecryptStreamMultiFromReader(&dec, bytes.NewReader(enc.Bytes()), pwd)
+		if err != nil {
+			t.Fatalf("decrypt with %q: %v", string(pwd), err)
+		}
+		if meta == nil || meta.Name != "team-secret.bin" {
+			t.Fatalf("expected meta, got %+v", meta)
+		}
+		if !bytes.Equal(dec.Bytes(), plaintext) {
+			t.Fatal("data mismatch")
+		}
+	}
+}
+
+func TestEncryptDecryptStreamMultiCompressionWithChecksum(t *testing.T) {
+	plaintext := []byte("multi compressed with checksum")
+	passwords := [][]byte{[]byte("x"), []byte("y")}
+
+	cfg := fastConfig()
+	cfg.Compression = true
+	cfg.Checksum = true
+
+	var enc bytes.Buffer
+	if err := EncryptStreamMulti(&enc, bytes.NewReader(plaintext), passwords, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, pwd := range passwords {
+		var dec bytes.Buffer
+		if _, err := DecryptStreamMultiFromReader(&dec, bytes.NewReader(enc.Bytes()), pwd); err != nil {
+			t.Fatalf("decrypt with %q: %v", string(pwd), err)
+		}
+		if !bytes.Equal(dec.Bytes(), plaintext) {
+			t.Fatal("data mismatch")
+		}
+	}
+}

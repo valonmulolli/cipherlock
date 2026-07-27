@@ -542,3 +542,95 @@ func TestEncryptKeyFile(t *testing.T) {
 		t.Fatalf("got %q, want %q", string(data), "key file test")
 	}
 }
+
+func TestEncryptDecryptWithCompression(t *testing.T) {
+	dir := t.TempDir()
+	srcPath := filepath.Join(dir, "compress_me.txt")
+	encPath := filepath.Join(dir, "compress_me.encrypted")
+	outPath := filepath.Join(dir, "compress_me.decrypted")
+
+	// Use a highly compressible payload to verify the compression codepath
+	payload := strings.Repeat("Hello, cipherlock compression! ", 2000)
+	if err := os.WriteFile(srcPath, []byte(payload), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	outputPath = encPath
+	passwordEnv = "CL_COMPRESS"
+	compressFlag = true
+	defer func() { outputPath = ""; passwordEnv = ""; compressFlag = false }()
+
+	t.Setenv("CL_COMPRESS", "test-password")
+
+	if err := encryptCmd.RunE(encryptCmd, []string{srcPath}); err != nil {
+		t.Fatalf("encrypt --compress failed: %v", err)
+	}
+	if _, err := os.Stat(encPath); err != nil {
+		t.Fatal("encrypted file not created")
+	}
+
+	// Verify the encrypted file is smaller than the plaintext (compression works)
+	plainInfo, _ := os.Stat(srcPath)
+	encInfo, _ := os.Stat(encPath)
+	if encInfo.Size() >= plainInfo.Size() {
+		t.Logf("warning: compressed size (%d) not smaller than plaintext (%d)",
+			encInfo.Size(), plainInfo.Size())
+	}
+
+	decryptOutput = outPath
+	decryptPasswordEnv = "CL_COMPRESS"
+	defer func() { decryptOutput = ""; decryptPasswordEnv = "" }()
+
+	if err := decryptCmd.RunE(decryptCmd, []string{encPath}); err != nil {
+		t.Fatalf("decrypt compressed file failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != payload {
+		t.Fatalf("round-trip mismatch: got %d bytes, want %d bytes", len(data), len(payload))
+	}
+}
+
+func TestEncryptDecryptWithCompressionAndChecksum(t *testing.T) {
+	dir := t.TempDir()
+	srcPath := filepath.Join(dir, "compress_sum_test.txt")
+	encPath := filepath.Join(dir, "compress_sum.encrypted")
+	outPath := filepath.Join(dir, "compress_sum.decrypted")
+
+	if err := os.WriteFile(srcPath, []byte("compressed with checksum"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	outputPath = encPath
+	passwordEnv = "CL_COMPRESS_SUM"
+	compressFlag = true
+	checksumFlag = true
+	defer func() {
+		outputPath = ""
+		passwordEnv = ""
+		compressFlag = false
+		checksumFlag = false
+	}()
+
+	t.Setenv("CL_COMPRESS_SUM", "test-password")
+
+	if err := encryptCmd.RunE(encryptCmd, []string{srcPath}); err != nil {
+		t.Fatalf("encrypt --compress --checksum failed: %v", err)
+	}
+
+	decryptOutput = outPath
+	decryptPasswordEnv = "CL_COMPRESS_SUM"
+	defer func() { decryptOutput = ""; decryptPasswordEnv = "" }()
+
+	if err := decryptCmd.RunE(decryptCmd, []string{encPath}); err != nil {
+		t.Fatalf("decrypt with compression+checksum failed: %v", err)
+	}
+
+	data, _ := os.ReadFile(outPath)
+	if string(data) != "compressed with checksum" {
+		t.Fatalf("got %q, want %q", string(data), "compressed with checksum")
+	}
+}

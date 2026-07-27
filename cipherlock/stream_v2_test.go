@@ -180,6 +180,90 @@ func TestEncryptDecryptStreamV2EmptyData(t *testing.T) {
 	}
 }
 
+func TestEncryptDecryptStreamV2Compression(t *testing.T) {
+	plaintext := bytes.Repeat([]byte("compressible data! "), 4096)
+	password := []byte("v06-compress")
+
+	cfg := fastConfig()
+	cfg.Compression = true
+
+	var enc bytes.Buffer
+	if err := EncryptStreamV2(&enc, bytes.NewReader(plaintext), password, cfg); err != nil {
+		t.Fatalf("EncryptStreamV2 with compression: %v", err)
+	}
+
+	// Verify flagCompressed is set in the header
+	encBytes := enc.Bytes()
+	if len(encBytes) < 7 {
+		t.Fatal("encrypted output too short")
+	}
+	// Magic(4) + version(1) + flags(1) — flags byte is at offset 5.
+	// bit 2 should be set.
+	if encBytes[5]&flagCompressed == 0 {
+		t.Fatal("flagCompressed not set in header")
+	}
+
+	var dec bytes.Buffer
+	if _, err := DecryptStreamV2(&dec, bytes.NewReader(encBytes), password); err != nil {
+		t.Fatalf("DecryptStreamV2 with compression: %v", err)
+	}
+	if !bytes.Equal(dec.Bytes(), plaintext) {
+		t.Fatal("compressed round-trip data mismatch")
+	}
+}
+
+func TestEncryptDecryptStreamV2CompressionWithMeta(t *testing.T) {
+	plaintext := []byte("compressed and metadatad")
+	password := []byte("v06-comp-meta")
+
+	cfg := fastConfig()
+	cfg.Compression = true
+	cfg.FileMeta = &FileMeta{
+		Name:    "secret.doc",
+		Size:    int64(len(plaintext)),
+		ModTime: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+	}
+
+	var enc bytes.Buffer
+	if err := EncryptStreamV2(&enc, bytes.NewReader(plaintext), password, cfg); err != nil {
+		t.Fatalf("encrypt with compression+meta: %v", err)
+	}
+
+	var dec bytes.Buffer
+	meta, err := DecryptStreamV2(&dec, bytes.NewReader(enc.Bytes()), password)
+	if err != nil {
+		t.Fatalf("decrypt with compression+meta: %v", err)
+	}
+	if meta == nil || meta.Name != "secret.doc" {
+		t.Fatalf("expected metadata, got %+v", meta)
+	}
+	if !bytes.Equal(dec.Bytes(), plaintext) {
+		t.Fatal("data mismatch with compression+meta")
+	}
+}
+
+func TestEncryptDecryptStreamV2CompressionWithChecksum(t *testing.T) {
+	plaintext := []byte("compressed with checksum")
+	password := []byte("v06-comp-sum")
+
+	cfg := fastConfig()
+	cfg.Compression = true
+	cfg.Checksum = true
+
+	var enc bytes.Buffer
+	if err := EncryptStreamV2(&enc, bytes.NewReader(plaintext), password, cfg); err != nil {
+		t.Fatalf("encrypt with compression+checksum: %v", err)
+	}
+
+	var dec bytes.Buffer
+	if _, err := DecryptStreamV2(&dec, bytes.NewReader(enc.Bytes()), password); err != nil {
+		t.Fatalf("decrypt with compression+checksum: %v", err)
+	}
+	if !bytes.Equal(dec.Bytes(), plaintext) {
+		t.Fatal("data mismatch with compression+checksum")
+	}
+}
+
 func TestDecryptAutoDetectsV2(t *testing.T) {
 	plaintext := []byte("auto-detect v0x06")
 	password := []byte("autodetect")
