@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
 	"os"
@@ -54,7 +55,8 @@ By default, keys are written to the current directory as:
 			if err != nil {
 				return fmt.Errorf("reading passphrase file: %w", err)
 			}
-			passphrase = p
+			passphrase = bytes.TrimRight(p, "\n\r")
+			defer clear(passphrase)
 		}
 
 		pubEncoded := base64.StdEncoding.EncodeToString(id.PublicKey)
