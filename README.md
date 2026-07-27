@@ -24,6 +24,7 @@ cipherlock is a Go library and CLI tool for encrypting files and directories usi
 - **Key file support**: Read password from a file instead of interactive prompt.
 - **Secure file shredding**: Overwrite original with random data before deletion on --in-place.
 - **Shell completion**: Generate completion scripts for bash, zsh, fish, and powershell.
+- **Key fingerprinting**: Display SHA-256 fingerprints of public keys for out-of-band verification.
 - **V1 backward compatibility**: Decrypt files created with the original PBKDF2+SHA1 format.
 - **Progress indication**: Visual progress bar for large file operations.
 - **zstd compression** (`--compress`): Compress plaintext with zstd before encryption. Reduces ciphertext size for text-heavy payloads (JSON, logs, source code) by 5–10×. Auto-detected on decrypt — no special flag needed.
@@ -192,6 +193,16 @@ Multiple recipients:
 ### Asymmetric decryption
 
     cipherlock decrypt --identity ~/.cipherlock/cipherlock.identity document.pdf.encrypted
+
+### Verify public keys
+
+Before encrypting for a recipient, verify the public key fingerprint over a separate channel (phone call, message, etc.):
+
+    cipherlock key fingerprint alice.pub
+
+Compare the output on both sides to confirm you have the correct key:
+
+    A1B2 C3D4 E5F6 7890 ABCD EF12 3456 7890 ABCD EF12 3456 7890 ABCD EF12 3456 7890
 
 If the identity is passphrase-protected, you'll be prompted for the passphrase automatically.
 
