@@ -58,7 +58,7 @@ func estimateStrength(pwd []byte) strength {
 		return veryWeak
 	}
 
-	runes := []rune(string(lower))
+	runes := []rune(string(pwd))
 	if len(runes) < 6 {
 		return veryWeak
 	}
