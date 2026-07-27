@@ -5,6 +5,8 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  schedule:
+    - cron: '0 6 * * 1'  # weekly: Monday 06:00 UTC
 
 jobs:
   ci:
@@ -38,6 +40,14 @@ jobs:
 
       - name: Compression tests
         run: go test -race -count=1 -timeout=300s -run 'Compression' ./...
+
+      - name: Fuzz tests (5 min per target)
+        if: github.event_name == 'schedule'
+        run: |
+          for target in FuzzDecryptStream FuzzDecryptStreamV2 FuzzDecryptStreamMulti FuzzDecryptAsymmetric FuzzDeserializeIdentity FuzzUnarmorBytes; do
+            echo "=== $target ==="
+            go test -fuzz="^$target$" -fuzztime=5m ./cipherlock/
+          done
 
       - name: Benchmark
         run: go test -bench=. -benchmem -count=1 -run='^$$' -timeout=600s ./cipherlock/...
