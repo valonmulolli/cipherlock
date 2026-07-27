@@ -35,5 +35,7 @@ func savePasswordsToKeychain(paths []string, passwords [][]byte) {
 	for _, p := range paths {
 		_ = keychainSet(getKeychainAccount(p), string(passwords[0]))
 	}
-	clear(passwords[0])
+	for _, pwd := range passwords {
+		clear(pwd)
+	}
 }
