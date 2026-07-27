@@ -481,6 +481,9 @@ func readStreamMultiMeta(r io.Reader, password []byte) (*FileMeta, error) {
 	if numRecipients == 0 {
 		return nil, ErrCorrupted
 	}
+	if numRecipients > maxRecipients {
+		return nil, ErrCorrupted
+	}
 
 	entries, err := readRecipientEntries(r, numRecipients)
 	if err != nil {
