@@ -160,7 +160,7 @@ func init() {
 	gateCmd.AddCommand(gateEncryptCmd)
 	gateCmd.AddCommand(gateDecryptCmd)
 
-	gateEncryptCmd.Flags().StringVar(&gateExpiresIn, "expires-in", "", "duration until file expires (e.g. 24h, 7d, 30m)")
+	gateEncryptCmd.Flags().StringVar(&gateExpiresIn, "expires-in", "", "duration until file expires (e.g. 24h, 168h, 30m)")
 	gateEncryptCmd.Flags().StringVar(&outputPath, "output", "", "output file path")
 	gateEncryptCmd.Flags().StringVar(&passwordEnv, "password-env", "", "read password from environment variable")
 	gateEncryptCmd.Flags().StringVar(&passwordFD, "password-fd", "", "read password from file descriptor number (e.g. 0 for stdin pipe)")
