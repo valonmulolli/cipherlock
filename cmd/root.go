@@ -402,6 +402,13 @@ func Execute() error {
 	return rootCmd.Execute()
 }
 
+//go:generate go run ../tools/gendocs/main.go
+
+// RootCommand returns the root cobra command for documentation generation.
+func RootCommand() *cobra.Command {
+	return rootCmd
+}
+
 func init() {
 	cobra.OnInitialize(func() {
 		quiet.Store(quietFlag)

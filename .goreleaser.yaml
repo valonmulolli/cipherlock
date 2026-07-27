@@ -3,6 +3,7 @@ version: 2
 before:
   hooks:
     - go mod tidy
+    - go run tools/gendocs/main.go
 
 builds:
   - binary: cipherlock
@@ -29,6 +30,7 @@ archives:
       - README.md
       - SECURITY.md
       - cipherlock.1
+      - docs/cli/*.md
 
 changelog:
   sort: asc
