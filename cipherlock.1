@@ -76,6 +76,14 @@ Display a saved configuration profile.
 .El
 .Ss Utility
 .Bl -tag -width Ds
+.It Cm bench
+Benchmark Argon2id KDF performance and recommend optimal parameters
+for the current hardware.
+.Pp
+Runs 12 benchmarks (32-256 MB memory at time=1, 2, 3) and selects
+the strongest parameters that complete within the target duration.
+The recommendation can be saved to a config profile with
+.Fl -save .
 .It Cm shred
 Securely delete files by overwriting with one pass of
 cryptographically random data followed by one pass of zeros.
@@ -223,6 +231,20 @@ Overwrite existing output file without prompting.
 .It Fl -force
 Skip confirmation prompts.
 .El
+.Ss Bench Flags
+.Bl -tag -width Ds
+.It Fl -target Ar duration
+Target KDF duration (default: 1s).
+Format is a Go duration string (e.g.,
+.Sq 1s ,
+.Sq 3s ,
+.Sq 500ms ).
+.It Fl -save Ar name
+Save the recommended profile under the given name.
+The profile can then be used with
+.Fl -profile Ar name
+on encrypt commands.
+.El
 .Sh FORMAT REFERENCE
 Encrypted files begin with the 4-byte magic prefix
 .Sq CV2\e0
@@ -335,6 +357,22 @@ and
 .Pa mykeys/cipherlock.pub .
 .Ss Check Password
 .Dl $ cipherlock click secret.encrypted
+.Ss Benchmark KDF Parameters
+.Dl $ cipherlock bench
+.Pp
+Benchmarks 12 Argon2id combinations (32-256 MB memory, time=1-3) and
+recommends the strongest parameters under 1 second.
+.Dl $ cipherlock bench --target 3s
+.Pp
+Uses a 3-second target instead of the default 1 second.
+.Dl $ cipherlock bench --save fast
+.Pp
+Saves the recommended profile to
+.Pa ~/.config/cipherlock/profiles.json
+as
+.Sq fast .
+Use it with:
+.Dl $ cipherlock encrypt --profile fast document.pdf
 .Sh SEE ALSO
 .Xr openssl 1 ,
 .Xr age 1 ,
