@@ -52,12 +52,13 @@ func (sw *safeWriter) Commit() error {
 		sw.direct = true
 		return nil
 	}
+	expected := int64(sw.buf.Len())
 	n, err := sw.buf.WriteTo(sw.dst)
 	sw.direct = true
 	if err != nil {
 		return err
 	}
-	if n < int64(sw.buf.Len()) {
+	if n < expected {
 		return io.ErrShortWrite
 	}
 	return nil
