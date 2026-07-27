@@ -58,6 +58,7 @@ const (
 
 	flagChecksum    byte = 1 << 0
 	flagHasMetadata byte = 1 << 1
+	flagCompressed  byte = 1 << 2
 )
 
 // maxSaltLen bounds the salt length accepted in any format header to prevent OOM
