@@ -4,10 +4,13 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/valonmulolli/cipherlock.svg)](https://pkg.go.dev/github.com/valonmulolli/cipherlock)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/valonmulolli/cipherlock)](https://go.dev/dl/)
 [![License](https://img.shields.io/github/license/valonmulolli/cipherlock)](LICENSE)
+[![Security](https://img.shields.io/badge/security-threat%20model-informational)](SECURITY.md)
 
 AES-256-GCM file encryption with Argon2id key derivation.
 
 cipherlock is a Go library and CLI tool for encrypting files and directories using authenticated encryption. It uses Argon2id (memory-hard key derivation) to resist GPU and ASIC brute-force attacks, and AES-256-GCM for verified confidentiality and integrity.
+
+📖 [Threat model & cryptographic design](SECURITY.md) · 📄 [man page](cipherlock.1) (`man -l cipherlock.1`)
 
 ## Features
 
@@ -23,6 +26,7 @@ cipherlock is a Go library and CLI tool for encrypting files and directories usi
 - **Shell completion**: Generate completion scripts for bash, zsh, fish, and powershell.
 - **V1 backward compatibility**: Decrypt files created with the original PBKDF2+SHA1 format.
 - **Progress indication**: Visual progress bar for large file operations.
+- **zstd compression** (`--compress`): Compress plaintext with zstd before encryption. Reduces ciphertext size for text-heavy payloads (JSON, logs, source code) by 5–10×. Auto-detected on decrypt — no special flag needed.
 - **Checksum verification**: Embedded SHA-256 checksum of plaintext. Verified automatically on decrypt when present.
 - **Re-key files**: Change the password on an encrypted file without decrypting to disk.
 - **Multi-recipient encryption**: Encrypt once for multiple passwords. Each recipient uses their own password to decrypt.
@@ -57,6 +61,13 @@ cipherlock is a Go library and CLI tool for encrypting files and directories usi
 
 Creates `document.pdf.encrypted` in the same directory.
 
+With zstd compression:
+
+    cipherlock encrypt --compress document.pdf
+
+Creates a smaller encrypted file by compressing the plaintext before
+encryption. Compression is automatically detected on decrypt.
+
 ### Decrypt a file
 
     cipherlock decrypt document.pdf.encrypted
@@ -83,6 +94,21 @@ Archives the directory (tar+gzip), encrypts it, and writes `secrets.cipherlock`.
 ### Decrypt a directory
 
     cipherlock decrypt secrets.cipherlock -o ./restored/
+
+### Encrypt with compression
+
+    cipherlock encrypt --compress document.pdf
+    cipherlock encrypt --compress --checksum server.log
+    cat data.json | cipherlock encrypt --compress > data.enc
+
+Compresses the plaintext with zstd before encryption. Compression is
+auto-detected on decrypt — no special flag needed. Combine with
+`--checksum` for integrity verification.
+
+Pipe mode: the `--compress` flag is also supported in pipe mode:
+
+    cat server.log | cipherlock encrypt --compress > log.enc
+    cat log.enc | cipherlock decrypt > server.log
 
 ### Use pipe mode
 
@@ -213,6 +239,7 @@ Overwrites each file with one pass of random data and one pass of zeros, then re
 Encrypt a file that can only be decrypted before a deadline:
 
     cipherlock gate encrypt --expires-in 24h secret.txt
+    cipherlock gate encrypt --expires-in 168h --compress secret.tar.gz
 
 Decrypt (fails if the expiration time has passed):
 
@@ -285,6 +312,7 @@ Prints the cipherlock version (set at build time via `-ldflags`).
 Encrypt with an embedded SHA-256 checksum:
 
     cipherlock encrypt --checksum document.pdf
+    cipherlock encrypt --compress --checksum server.log
 
 On decrypt, the checksum is automatically verified if present:
 
@@ -428,11 +456,12 @@ err := cipherlock.DecryptDir("mydir.cipherlock", "./mydir", password)
 
 ```go
 config := &cipherlock.Config{
-    SaltLen: 16,
-    Time:    4,
-    Memory:  128 * 1024, // 128 MB
-    Threads: 8,
-    KeyLen:  32,
+    SaltLen:     16,
+    Time:        4,
+    Memory:      128 * 1024, // 128 MB
+    Threads:     8,
+    KeyLen:      32,
+    Compression: true, // enable zstd compression
 }
 if err := config.Validate(); err != nil {
     // returns ErrConfigInvalid wrapping a descriptive message
@@ -443,6 +472,10 @@ err := cipherlock.Encrypt(dst, src, password, config)
 Setting `nil` uses `cipherlock.DefaultConfig` (time=3, memory=64MB, threads=4).
 
 `Config.Validate()` checks fields against defensive bounds: `SaltLen` (8-1024), `KeyLen` (16-64), `Time` (1-60), `Memory` (1-262144 KiB), `Threads` (1-32), `ChunkSize` (1-16MB).
+
+`Compression: true` compresses the plaintext with zstd before encryption.
+It is supported in v0x06, v0x07, and v0x08 formats (auto-selected when
+compression is enabled). Decryption auto-detects the compression flag.
 
 ### Check if a file is encrypted
 
@@ -617,6 +650,9 @@ cipherlock uses a self-describing binary format with versioned headers (v0x02–
 
 ## Security
 
+> 📖 Full threat model, cryptographic design, and responsible disclosure process
+documented in [SECURITY.md](SECURITY.md).
+
 ### Key derivation
 
 cipherlock uses Argon2id, the current state of the art in password-based key derivation. It is memory-hard, meaning an attacker needs a proportionally large amount of memory to attempt each password guess, making GPU and ASIC acceleration impractical.
@@ -711,14 +747,14 @@ trade-offs.
 
 ### Format-version trade-offs
 
-| Version | Year | Use when                                                                | Avoid when                             |
-| ------- | ---- | ----------------------------------------------------------------------- | -------------------------------------- |
-| V2/V3   | 2024 | Single recipient, plaintext fits in memory, checksum not needed         | Files larger than a few hundred MB     |
-| V4      | 2024 | Multi-recipient where all recipients can be enumerated at encrypt time  | Files larger than available RAM        |
-| V5      | 2024 | Single recipient, streaming, large files; metadata can be public        | Filename/size are sensitive            |
-| V6      | 2026 | Single recipient, streaming, large files, metadata must be confidential | You need zero-cost metadata inspection |
-| V7      | 2026 | Multi-recipient, streaming, large files, metadata must be confidential  | Legacy interop with V4 is required     |
-| V8      | 2026 | Multi-recipient, asymmetric X25519 keys, metadata must be confidential  | Recipients don't have key pairs        |
+| Version | Year | Compression | Use when                                                                | Avoid when                             |
+| ------- | ---- | ----------- | ----------------------------------------------------------------------- | -------------------------------------- |
+| V2/V3   | 2024 | ❌          | Single recipient, plaintext fits in memory, checksum not needed         | Files larger than a few hundred MB     |
+| V4      | 2024 | ❌          | Multi-recipient where all recipients can be enumerated at encrypt time  | Files larger than available RAM        |
+| V5      | 2024 | ❌          | Single recipient, streaming, large files; metadata can be public        | Filename/size are sensitive            |
+| V6      | 2026 | ✅          | Single recipient, streaming, large files, metadata must be confidential | You need zero-cost metadata inspection |
+| V7      | 2026 | ✅          | Multi-recipient, streaming, large files, metadata must be confidential  | Legacy interop with V4 is required     |
+| V8      | 2026 | ✅          | Multi-recipient, asymmetric X25519 keys, metadata must be confidential  | Recipients don't have key pairs        |
 
 ## Installation
 
@@ -734,7 +770,7 @@ trade-offs.
 
 ### Prebuilt binaries
 
-Download the latest release for your platform from the [releases page](https://github.com/valonmulolli/cipherlock/releases). Binaries are available for Linux, macOS, and Windows (amd64 and arm64).
+Download the latest release for your platform from the [releases page](https://github.com/valonmulolli/cipherlock/releases). Binaries are available for Linux, macOS, and Windows (amd64 and arm64). Each release archive includes the binary, LICENSE, README, [SECURITY.md](SECURITY.md), and the [man page](cipherlock.1).
 
 ## Demo
 
