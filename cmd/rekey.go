@@ -97,11 +97,21 @@ write to a different path (the original is preserved).`,
 			}
 		}
 
+		cfg := &cipherlock.Config{
+			SaltLen:     cipherlock.DefaultConfig.SaltLen,
+			Time:        cipherlock.DefaultConfig.Time,
+			Memory:      cipherlock.DefaultConfig.Memory,
+			Threads:     cipherlock.DefaultConfig.Threads,
+			KeyLen:      cipherlock.DefaultConfig.KeyLen,
+			Checksum:    checksumFlag,
+			Compression: compressFlag,
+		}
+
 		stopKDF := showKDF()
 		var err error
 
 		if dest == source || inPlace {
-			err = cipherlock.ReKeyFile(source, "", oldPwd, newPwd, nil)
+			err = cipherlock.ReKeyFile(source, "", oldPwd, newPwd, cfg)
 			stopKDF()
 			if err != nil {
 				if isAuthError(err) {
@@ -129,7 +139,7 @@ write to a different path (the original is preserved).`,
 				return err
 			}
 
-			err = cipherlock.ReKey(destFile, progressReader(srcFile, info.Size(), "rotoring"), oldPwd, newPwd, nil)
+			err = cipherlock.ReKey(destFile, progressReader(srcFile, info.Size(), "rotoring"), oldPwd, newPwd, cfg)
 			closeErr := destFile.Close()
 			stopKDF()
 			if err != nil {
@@ -168,4 +178,6 @@ func init() {
 	rekeyCmd.Flags().StringVar(&rekeyNewPasswordEnv, "new-password-env", "", "read new password from environment variable")
 	rekeyCmd.Flags().StringVar(&rekeyNewPasswordFD, "new-password-fd", "", "read new password from file descriptor number (e.g. 0 for stdin pipe)")
 	rekeyCmd.Flags().BoolVar(&rekeyNewPasswordStdin, "new-password-stdin", false, "read new password from stdin")
+	rekeyCmd.Flags().BoolVar(&checksumFlag, "checksum", false, "enable integrity checksum on re-encrypted output")
+	rekeyCmd.Flags().BoolVar(&compressFlag, "compress", false, "compress data with zstd before re-encryption")
 }
