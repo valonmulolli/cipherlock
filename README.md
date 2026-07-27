@@ -6,824 +6,129 @@
 [![License](https://img.shields.io/github/license/valonmulolli/cipherlock)](LICENSE)
 [![Security](https://img.shields.io/badge/security-threat%20model-informational)](SECURITY.md)
 
-AES-256-GCM file encryption with Argon2id key derivation.
-
-cipherlock is a Go library and CLI tool for encrypting files and directories using authenticated encryption. It uses Argon2id (memory-hard key derivation) to resist GPU and ASIC brute-force attacks, and AES-256-GCM for verified confidentiality and integrity.
-
-📖 [Threat model & cryptographic design](SECURITY.md) · 📄 [man page](cipherlock.1) (`man -l cipherlock.1`)
+AES-256-GCM file encryption with Argon2id key derivation -- Go library and CLI tool.
+[Threat model & cryptographic design](SECURITY.md) · [man page](cipherlock.1) (`man -l cipherlock.1`) · [CLI reference](docs/cli/cipherlock.md)
 
 ## Features
 
-- **Strong encryption**: AES-256-GCM authenticated encryption with 12-byte random nonces.
-- **Memory-hard KDF**: Argon2id key derivation with configurable time, memory, and parallelism parameters. Defaults follow OWASP recommendations (time=3, memory=64MB, threads=4).
-- **Streaming encryption**: Reads and encrypts files in 64KB chunks. No upper file size limit — only the current chunk resides in memory.
-- **Directory encryption**: Archive entire directories (tar + gzip) before encryption for atomic encrypted bundles.
-- **Pipe mode**: Encrypt from stdin and write to stdout for seamless shell integration.
-- **Password generation**: Generate cryptographically random passwords with `--gen-password`.
-- **ASCII-armor output**: Base64 armored format for sharing encrypted files via text or email.
-- **Key file support**: Read password from a file instead of interactive prompt.
-- **Secure file shredding**: Overwrite original with random data before deletion on --in-place.
-- **Shell completion**: Generate completion scripts for bash, zsh, fish, and powershell.
-- **Key fingerprinting**: Display SHA-256 fingerprints of public keys for out-of-band verification.
-- **V1 backward compatibility**: Decrypt files created with the original PBKDF2+SHA1 format.
-- **Progress indication**: Visual progress bar for large file operations.
-- **zstd compression** (`--compress`): Compress plaintext with zstd before encryption. Reduces ciphertext size for text-heavy payloads (JSON, logs, source code) by 5–10×. Auto-detected on decrypt — no special flag needed.
-- **Auto-tuning benchmark** (`bench`): Run Argon2id benchmarks across a range of memory and time settings to find the strongest KDF parameters for your hardware. Save with `--save` and use as a profile.
-- **Checksum verification**: Embedded SHA-256 checksum of plaintext. Verified automatically on decrypt when present.
-- **Re-key files**: Change the password on an encrypted file without decrypting to disk.
-- **Multi-recipient encryption**: Encrypt once for multiple passwords. Each recipient uses their own password to decrypt.
-- **Library + CLI dual use**: Importable Go package with a full-featured command-line interface built with Cobra.
-- **Password strength estimation**: Rates password entropy from "very weak" to "very strong" on encrypt/rekey.
-- **Saved config profiles**: Store and reuse Argon2id parameter sets with `config set-profile` / `--profile`.
-- **KDF progress indicator**: "Deriving key..." animated scramble spinner and file-size progress bars during encrypt/decrypt/rekey.
-- **Context-aware library API**: `EncryptContext`, `DecryptContext`, `DecryptWithMetaContext`, `EncryptStreamContext` — cancel long operations via Go contexts.
-- **Sentinel error types**: `ErrAuthFailed`, `ErrChecksumMismatch`, `ErrCorrupted` — programmatic error handling instead of string matching.
-- **Encrypted-metadata streaming (v0x06)**: Optional `FileMeta` is stored as an encrypted chunk so the original filename and size are not visible without the password.
-- **Streaming multi-recipient (v0x07)**: Multi-recipient encryption that streams the plaintext in fixed-size chunks. No upper file size limit, even with `--recipient` flags.
-- **X25519 asymmetric encryption (v0x08)**: Encrypt files to one or more X25519 public keys using ephemeral key exchange + HKDF + AES-256-GCM. Each recipient decrypts with their private identity key — no shared password needed.
-- **Identity key generation**: `dial` creates X25519 key pairs. Private keys can be passphrase-protected with Argon2id + AES-256-GCM.
-- **SSH key identity support**: Use Ed25519 SSH keys (`~/.ssh/id_ed25519`) directly as cipherlock identities via `--identity`.
-- **Password from env/fd**: `--password-env VAR` and `--password-fd N` let CI/CD pipelines supply passwords without interactive prompts or temporary files.
-- **Parallel batch processing**: `--jobs N` encrypts or decrypts multiple files concurrently using a worker pool.
-- **Defensive header bounds**: Salt, key length, chunk size, and recipient count are validated against strict upper limits to prevent OOM via maliciously crafted files.
-- **Time-gated encryption**: `gate` command embeds an expiry time. Decryption fails after expiration.
-- **Integrity & password verification**: `bombe` verifies file integrity; `click` verifies password correctness — both without writing output.
-- **Quiet mode**: `--quiet` suppresses progress bars/spinners and shows a compact `done`/`failed` per operation.
-- **Shred progress bar**: Visual pass counter and progress bar when shredding files.
-- **Key memory zeroing**: Derived keys and ECDH shared secrets are explicitly zeroed after use.
-- **Signal-safe in-place writes**: SIGINT during `--in-place` encrypt/decrypt leaves the original file intact.
-- **Recursive batch processing**: `--recursive` walks directories; `--include`/`--exclude` filter by glob patterns.
-- **Dry-run mode**: `--dry-run` validates inputs and flags without writing any output.
+- **AES-256-GCM** authenticated encryption with 12-byte random nonces
+- **Argon2id** memory-hard KDF (default: time=3, memory=64MB, threads=4, OWASP-recommended)
+- **zstd compression** (`--compress`): compress plaintext before encryption, auto-detected on decrypt
+- **Streaming encryption**: reads and encrypts in 64KB chunks, no upper file size limit
+- **Directory encryption**: tar + gzip before encrypt, decrypt with `--dir`
+- **Pipe mode**: encrypt from stdin / decrypt to stdout for shell pipelines
+- **Multi-recipient**: encrypt once for multiple passwords (v0x07)
+- **Asymmetric X25519**: encrypt to public keys, decrypt with identity (v0x08)
+- **Time-gated encryption** (`gate`): embeds an expiration time, decryption fails after expiry
+- **Re-key** (`rotor`): change a file's password without decrypting to disk
+- **Key fingerprinting**: `key fingerprint <pubkey>` displays SHA-256 hash for out-of-band verification
+- **Auto-tuning benchmark** (`bench`): finds strongest Argon2id parameters for your hardware
+- **ASCII-armor output**: base64 with PEM-style headers for text-only channels
+- **Checksum verification**: embedded SHA-256, verified on decrypt when present
+- **Secure shredding**: overwrite with random data + zeros before deletion
+- **Config profiles**: save and reuse Argon2id parameter sets
+- **Shell completion**: bash, zsh, fish, powershell
+- **Backward compatible**: decrypts V1 PBKDF2+SHA1 format
+- **Library + CLI dual use**: importable Go package with cobra CLI
 
-## Usage
+## Quick start
 
-### Encrypt a file
+    go install github.com/valonmulolli/cipherlock@latest
+
+Encrypt a file:
 
     cipherlock encrypt document.pdf
 
-Creates `document.pdf.encrypted` in the same directory.
-
-With zstd compression:
-
-    cipherlock encrypt --compress document.pdf
-
-Creates a smaller encrypted file by compressing the plaintext before
-encryption. Compression is automatically detected on decrypt.
-
-### Decrypt a file
+Decrypt:
 
     cipherlock decrypt document.pdf.encrypted
 
-Restores `document.pdf` if the password is correct.
-
-### Encrypt in-place (overwrite source)
-
-    cipherlock encrypt --in-place document.pdf
-
-Encrypts the file and replaces the original. A temporary file is used so the original is only overwritten on successful encryption.
-
-### Specify output path
-
-    cipherlock encrypt document.pdf -o secret.enc
-    cipherlock decrypt secret.enc -o document.pdf
-
-### Encrypt a directory
-
-    cipherlock encrypt ./projects/secrets/
-
-Archives the directory (tar+gzip), encrypts it, and writes `secrets.cipherlock`.
-
-### Decrypt a directory
-
-    cipherlock decrypt secrets.cipherlock -o ./restored/
-
-### Encrypt with compression
+Encrypt with compression:
 
     cipherlock encrypt --compress document.pdf
-    cipherlock encrypt --compress --checksum server.log
-    cat data.json | cipherlock encrypt --compress > data.enc
 
-Compresses the plaintext with zstd before encryption. Compression is
-auto-detected on decrypt — no special flag needed. Combine with
-`--checksum` for integrity verification.
-
-Pipe mode: the `--compress` flag is also supported in pipe mode:
-
-    cat server.log | cipherlock encrypt --compress > log.enc
-    cat log.enc | cipherlock decrypt > server.log
-
-### Use pipe mode
-
-    cat document.pdf | cipherlock encrypt > document.pdf.enc
-    cat document.pdf.enc | cipherlock decrypt > document.pdf
-
-### Generate a password
-
-    cipherlock encrypt --gen-password document.pdf
-
-Generates a 64-character hex-encoded random password and prints it to stderr. The password is shown only once during encryption.
-
-### Armor mode (ASCII-armor output)
-
-    cipherlock encrypt --armor document.pdf -o document.asc
-
-Wraps the encrypted output in base64 with PEM-style headers. Suitable for sharing via email, chat, or other text-only channels.
-
-    -----BEGIN CIPHERLOCK-----
-    <base64-encoded data, wrapped at 64 characters>
-    -----END CIPHERLOCK-----
-
-Decrypt auto-detects the armor format -- no special flag required.
-
-### Use a key file
-
-    cipherlock encrypt --key-file ~/.keys/myapp.key document.pdf
-    cipherlock decrypt --key-file ~/.keys/myapp.key document.pdf.encrypted
-
-Reads the password from a file instead of prompting interactively. Useful for scripts and automation.
-
-### Multi-recipient encryption
-
-Encrypt a file for multiple recipients. Each recipient can decrypt with their own password:
-
-    cipherlock encrypt --recipient "alice" --recipient "bob" document.pdf
-
-The primary password is prompted interactively (or provided via `--key-file` or `--gen-password`). Additional recipients are added with `--recipient`. All recipients can independently decrypt the file.
-
-### Re-key an encrypted file (rotor)
-
-Change the password on an encrypted file without decrypting to disk:
+Re-encrypt with a new password:
 
     cipherlock rotor document.pdf.encrypted
 
-Prompts for the old and new passwords. All scripting-friendly flags are supported for both the old and new passwords:
+Encrypt a directory:
 
-| Flag                                    | Old password       | New password      |
-| --------------------------------------- | ------------------ | ----------------- |
-| `--key-file` / `--new-key-file`         | Read from file     | Read from file    |
-| `--password-env` / `--new-password-env` | Read from env var  | Read from env var |
-| `--password-fd` / `--new-password-fd`   | Read from fd       | Read from fd      |
-| `--keychain` / `--save-keychain`        | Read from keychain | Save to keychain  |
+    cipherlock encrypt ./projects/secrets/
 
-Additional flags: `--output`, `--in-place`, `--force` (overwrite without prompt).
-
-### Generate X25519 key pair
-
-    cipherlock dial mykey
-
-Creates `mykey.identity` (private key, armored) and `mykey.pub` (public key, base64) in the current directory.
-Use `--output-dir` to write to a different directory:
-
-    cipherlock dial mykey --output-dir ~/.cipherlock
-
-Protect the identity with a passphrase:
-
-    cipherlock dial mykey --passphrase-file ~/.secrets/identity-pass.txt
-
-### Asymmetric encryption (X25519 public key)
-
-Encrypt a file so only the holder of the corresponding identity can decrypt:
-
-    cipherlock encrypt --recipient-pubkey alice.pub document.pdf
-
-Multiple recipients:
-
-    cipherlock encrypt --recipient-pubkey alice.pub --recipient-pubkey bob.pub document.pdf
-
-### Asymmetric decryption
-
-    cipherlock decrypt --identity ~/.cipherlock/cipherlock.identity document.pdf.encrypted
-
-### Verify public keys
-
-Before encrypting for a recipient, verify the public key fingerprint over a separate channel (phone call, message, etc.):
-
-    cipherlock key fingerprint alice.pub
-
-Compare the output on both sides to confirm you have the correct key:
-
-    A1B2 C3D4 E5F6 7890 ABCD EF12 3456 7890 ABCD EF12 3456 7890 ABCD EF12 3456 7890
-
-If the identity is passphrase-protected, you'll be prompted for the passphrase automatically.
-
-You can also use an Ed25519 SSH private key directly:
-
-    cipherlock decrypt --identity ~/.ssh/id_ed25519 document.pdf.encrypted
-
-### Password from environment variable
-
-    CIPHERLOCK_PASS="my-secret" cipherlock encrypt --password-env CIPHERLOCK_PASS document.pdf
-
-Useful in CI/CD pipelines where interactive prompts are unavailable.
-
-### Password from file descriptor
-
-    echo -n "my-secret" | cipherlock encrypt --password-fd 0 document.pdf
-
-File descriptor 0 is stdin. Also works for decrypt and rekey.
-
-### System keychain
-
-    cipherlock encrypt --keychain document.pdf
-    cipherlock encrypt --save-keychain --keychain document.pdf
-
-`--keychain` reads the password from the system keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager). `--save-keychain` stores the password after a successful operation. The file path is used as the keychain account name.
-
-Also works for decrypt and rekey.
-
-### Parallel batch processing
-
-Encrypt or decrypt multiple files concurrently:
-
-    cipherlock encrypt --jobs 4 file1.txt file2.txt file3.txt file4.txt
-    cipherlock decrypt --jobs 4 file1.txt.encrypted file2.txt.encrypted
-
-Controls how many files are processed simultaneously. Defaults to sequential (1 job).
-
-The `--out-dir` flag controls where batch output goes:
-
-    cipherlock encrypt --out-dir ./encrypted --jobs 4 file1.txt file2.txt
-    cipherlock decrypt --out-dir ./restored --jobs 4 file1.txt.encrypted
-
-### Securely shred files
-
-    cipherlock shred sensitive.pdf secret.tmp
-
-Overwrites each file with one pass of random data and one pass of zeros, then removes it. Shows a per-file progress bar with pass counter. Supports multiple paths in one command. Combine with `--quiet` to suppress the progress bar.
-
-### Time-gated encryption (gate)
-
-Encrypt a file that can only be decrypted before a deadline:
-
-    cipherlock gate encrypt --expires-in 24h secret.txt
-    cipherlock gate encrypt --expires-in 168h --compress secret.tar.gz
-
-Decrypt (fails if the expiration time has passed):
-
-    cipherlock gate decrypt secret.cipherlock
-
-The expiration time is embedded in the encrypted metadata. After expiry, decryption reports an error and the output is removed.
-
-### Verify integrity (bombe)
-
-Full decryption check without writing output:
-
-    cipherlock bombe document.pdf.encrypted
-
-Returns exit code 0 if the file is intact and the password is correct.
-Differentiates between "wrong password" and "file is corrupted".
-
-### Verify password (click)
-
-Quick password verification without writing output:
-
-    cipherlock click document.pdf.encrypted
-
-Checks if the password is correct and the file format is valid. Same as `decrypt --check`.
-
-### Dry-run mode
-
-Validate inputs and flags without writing any output:
-
-    cipherlock encrypt --dry-run document.pdf
-    cipherlock decrypt --dry-run document.pdf.encrypted
-
-### Recursive batch processing
-
-Process all files in a directory tree:
-
-    cipherlock encrypt --recursive ./docs/
-    cipherlock decrypt --recursive ./docs/
-
-Filter with glob patterns:
-
-    cipherlock encrypt --recursive --include "*.txt" --exclude "*.tmp" ./docs/
-
-### Keep original on --in-place
-
-By default, `--in-place` shreds the original file after encrypting/decrypting:
-
-    cipherlock encrypt --in-place --keep document.pdf
-
-The `--keep` flag preserves the original (renamed to `.bak`).
-The `--backup` flag saves an extra `.bak` copy before the operation.
-
-### Inspect encrypted file metadata
-
-    cipherlock tumbler document.pdf.encrypted
-
-Displays the format version, whether the file is encrypted, and any cleartext metadata. For v0x06/v0x07 files with encrypted metadata:
-
-    cipherlock tumbler --password "my-secret" document.pdf.encrypted
-
-Reveals the original filename, size, and modification time.
-
-### Print version
-
-    cipherlock version
-
-Prints the cipherlock version (set at build time via `-ldflags`).
-
-### Verify checksum
-
-Encrypt with an embedded SHA-256 checksum:
-
-    cipherlock encrypt --checksum document.pdf
-    cipherlock encrypt --compress --checksum server.log
-
-On decrypt, the checksum is automatically verified if present:
-
-    cipherlock decrypt document.pdf.encrypted
-
-If the file was tampered with, decrypt reports a checksum mismatch error.
-
-### Config profiles
-
-Save Argon2id parameter sets for reuse:
-
-    cipherlock config set-profile high --time 4 --memory 262144 --threads 8 --checksum
-    cipherlock encrypt --profile high document.pdf
-
-List and remove profiles:
-
-    cipherlock config list-profiles
-    cipherlock config remove-profile high
-
-Profiles are stored at `~/.config/cipherlock/profiles.json`.
-
-### Auto-tune KDF parameters (bench)
-
-Find the strongest Argon2id parameters for your hardware:
-
-    cipherlock bench
-
-Benchmarks 12 combinations (32–256 MB, time 1–3) and recommends the
-best fit within the default 1-second target:
-
-```
-  Memory  Time=1  Time=2  Time=3
-  32 MB    287 ms   530 ms   790 ms
-  64 MB    512 ms   987 ms   1.5 s
-  128 MB   1.1 s    2.1 s    3.2 s    ← ⭐
-  256 MB   2.2 s    4.3 s    6.5 s
-```
-
-Custom target duration:
-
-    cipherlock bench --target 3s
-
-Save the recommended profile automatically:
+Benchmark KDF parameters:
 
     cipherlock bench --save my-profile
     cipherlock encrypt --profile my-profile document.pdf
 
-### Shell completion
+Generate a key pair and fingerprint:
 
-    cipherlock completion bash > /etc/bash_completion.d/cipherlock
-    cipherlock completion zsh > "${fpath[1]}/_cipherlock"
-    cipherlock completion fish > ~/.config/fish/completions/cipherlock.fish
+    cipherlock dial mykey
+    cipherlock key fingerprint mykey.pub
 
-Supports bash, zsh, fish, and powershell. Requires no additional dependencies -- generated by cobra's built-in completion engine.
+Encrypt with a public key:
 
-### Legacy format support
+    cipherlock encrypt --recipient-pubkey mykey.pub secret.txt
 
-Files encrypted with the original `file-encryption` tool (PBKDF2+SHA1, 4096 iterations) can be decrypted using the same `decrypt` command. cipherlock detects the format automatically.
+Full CLI command reference (all commands, flags, examples):
 
-## Library usage
+  - [CLI reference](docs/cli/cipherlock.md) -- auto-generated from cobra command definitions
+  - `cipherlock <command> --help` -- built-in help for every command
 
-Import cipherlock in your Go project:
+## Library
 
     import "github.com/valonmulolli/cipherlock/cipherlock"
 
-### Encrypt data
-
 ```go
+// Encrypt a reader to a writer
 var buf bytes.Buffer
 err := cipherlock.Encrypt(&buf, someReader, password, nil)
-```
 
-`Encrypt` now produces the v0x05 streaming format (same as `EncryptStream`). It reads the input in chunks and writes encrypted output incrementally. The entire file is never loaded into memory. For explicit streaming, use `EncryptStream`.
+// Decrypt a reader to a writer
+var plain bytes.Buffer
+err := cipherlock.Decrypt(&plain, someReader, password)
 
-### Encrypt with metadata (filename, size, modtime)
+// Use the full streaming API with context support
+meta, err := cipherlock.DecryptWithMetaContext(ctx, &plain, encryptedReader, password)
 
-Metadata is automatically collected from the source file when using the CLI and stored in the v0x05 header:
-
-    cipherlock encrypt document.pdf
-
-On decrypt without `--output`, the original filename, size, and modification time are restored automatically.
-
-### Decrypt data
-
-```go
-var buf bytes.Buffer
-err := cipherlock.Decrypt(&buf, someReader, password)
-```
-
-`Decrypt` auto-detects all format versions (v0x02–v0x08) — no special flag needed.
-
-### Context-aware encryption (cancellable)
-
-```go
-ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-defer cancel()
-
-var buf bytes.Buffer
-err := cipherlock.EncryptContext(ctx, &buf, someReader, password, nil)
-// returns context.DeadlineExceeded if KDF or encryption takes too long
-```
-
-To recover metadata alongside decryption:
-
-```go
-var buf bytes.Buffer
-meta, err := cipherlock.DecryptWithMetaContext(ctx, &buf, someReader, password)
-// meta is non-nil for v0x06/v0x07 sources with attached FileMeta
-```
-
-Available context variants: `EncryptContext`, `DecryptContext`, `DecryptWithMetaContext`, `EncryptStreamContext`, `DecryptStreamContext`, `EncryptMultiContext`, `EncryptStreamV2Context`, `DecryptStreamV2Context`, `EncryptStreamMultiContext`, `DecryptStreamMultiContext`.
-
-### Error handling with sentinel errors
-
-```go
-if errors.Is(err, cipherlock.ErrAuthFailed) {
-    // wrong password or corrupted data
-}
-if errors.Is(err, cipherlock.ErrChecksumMismatch) {
-    // file was tampered with
-}
-if errors.Is(err, cipherlock.ErrCorrupted) {
-    // file format is damaged
-}
-if errors.Is(err, cipherlock.ErrInvalidFormat) {
-    // not a cipherlock file
-}
-if errors.Is(err, cipherlock.ErrEncryptedMeta) {
-    // metadata is encrypted; call ReadStreamMetaWithPassword with a password
-}
-```
-
-Available sentinel errors: `ErrInvalidFormat`, `ErrVersionMismatch`, `ErrAuthFailed`, `ErrChecksumMismatch`, `ErrCorrupted`, `ErrAtLeastOnePassword`, `ErrEncryptedMeta`, `ErrNotArmored`, `ErrUnsupportedIdentity`, `ErrIdentityNeedsPassphrase`, `ErrConfigInvalid`.
-
-### Read file metadata without decrypting
-
-```go
-meta, err := cipherlock.ReadStreamMeta(encryptedFile)
-// meta.Name, meta.Size, meta.ModTime (nil if not a v0x05 stream)
-```
-
-### Encrypt a file (using EncryptFile)
-
-```go
-err := cipherlock.EncryptFile("source.txt", "source.txt.encrypted", password, nil)
-```
-
-### Decrypt a file
-
-```go
-err := cipherlock.DecryptFile("source.txt.encrypted", "source.txt", password)
-```
-
-### Encrypt a directory
-
-```go
-err := cipherlock.EncryptDir("./mydir", "mydir.cipherlock", password, nil)
-```
-
-### Decrypt a directory
-
-```go
-err := cipherlock.DecryptDir("mydir.cipherlock", "./mydir", password)
-```
-
-### Custom configuration
-
-```go
+// Encrypt with custom configuration (compression, KDF params, metadata)
 config := &cipherlock.Config{
-    SaltLen:     16,
-    Time:        4,
-    Memory:      128 * 1024, // 128 MB
-    Threads:     8,
-    KeyLen:      32,
-    Compression: true, // enable zstd compression
-}
-if err := config.Validate(); err != nil {
-    // returns ErrConfigInvalid wrapping a descriptive message
+    Memory: 128 * 1024,
+    Compression: true,
+    FileMeta: &cipherlock.FileMeta{Name: "doc.pdf"},
 }
 err := cipherlock.Encrypt(dst, src, password, config)
 ```
 
-Setting `nil` uses `cipherlock.DefaultConfig` (time=3, memory=64MB, threads=4).
-
-`Config.Validate()` checks fields against defensive bounds: `SaltLen` (8-1024), `KeyLen` (16-64), `Time` (1-60), `Memory` (1-262144 KiB), `Threads` (1-32), `ChunkSize` (1-16MB).
-
-`Compression: true` compresses the plaintext with zstd before encryption.
-It is supported in v0x06, v0x07, and v0x08 formats (auto-selected when
-compression is enabled). Decryption auto-detects the compression flag.
-
-### Check if a file is encrypted
-
-```go
-ok, err := cipherlock.IsEncrypted("file.enc")
-```
-
-### Encrypt with ASCII armor
-
-```go
-var encrypted bytes.Buffer
-cipherlock.Encrypt(&encrypted, someReader, password, nil)
-var armored bytes.Buffer
-cipherlock.Armor(&armored, encrypted.Bytes())
-```
-
-### Decrypt armored data
-
-```go
-data, _ := cipherlock.UnarmorBytes(armoredData)
-var plaintext bytes.Buffer
-cipherlock.Decrypt(&plaintext, bytes.NewReader(data), password)
-```
-
-### Check if data is armored
-
-```go
-if cipherlock.IsArmored(data) {
-    // handle armored format
-}
-```
-
-### Securely delete a file
-
-```go
-err := cipherlock.Shred("sensitive-file.txt")
-```
-
-Overwrites the file with random data, then zeros, then removes it.
-
-### Decrypt legacy V1 format
-
-```go
-err := cipherlock.DecryptFileV1("old_file.encrypted", "old_file", password)
-```
-
-### Re-key an encrypted file
-
-```go
-err := cipherlock.ReKeyFile("old.encrypted", "new.encrypted", oldPassword, newPassword, nil)
-```
-
-For stream-based rekeying without file paths:
-
-```go
-var buf bytes.Buffer
-err := cipherlock.ReKey(&buf, oldFile, oldPassword, newPassword, nil)
-```
-
-### Asymmetric encryption (X25519)
-
-```go
-privKey := make([]byte, 32) // 32-byte private key seed
-identity, _ := cipherlock.X25519IdentityFromPrivateKey(privKey)
-// identity.PublicKey is the corresponding 32-byte public key
-
-recipient, _ := cipherlock.NewX25519Recipient(identity.PublicKey)
-
-var encrypted bytes.Buffer
-err := cipherlock.EncryptAsymmetric(&encrypted, someReader, []*cipherlock.X25519Recipient{recipient}, nil)
-```
-
-EncryptAsymmetric accepts one or more recipients. The data is encrypted with a random file key, and the file key is sealed once per recipient using ECDH + HKDF + AES-256-GCM.
-
-### Asymmetric decryption
-
-```go
-var decrypted bytes.Buffer
-err := cipherlock.DecryptAsymmetric(&decrypted, encryptedReader, identity)
-```
-
-The identity is matched against each recipient entry in the v0x08 header. Key exchange uses the ephemeral public key stored in the header.
-
-### Load an SSH key as cipherlock identity
-
-```go
-pemData, _ := os.ReadFile(os.ExpandEnv("$HOME/.ssh/id_ed25519"))
-identity, err := cipherlock.IdentityFromSSHPrivateKey(pemData)
-// identity can be used with DecryptAsymmetric, DecryptAsymmetricWithMeta, etc.
-```
-
-Only Ed25519 SSH keys are supported. RSA and ECDSA return `ErrUnsupportedKeyType`.
-
-### Multi-recipient encryption
-
-Use `EncryptStreamMulti` (v0x07) for new code. It streams the plaintext
-through encryption, supports an optional encrypted `FileMeta`, and is
-the recommended path for arbitrarily large files.
-
-```go
-passwords := [][]byte{[]byte("alice"), []byte("bob"), []byte("charlie")}
-var buf bytes.Buffer
-err := cipherlock.EncryptStreamMulti(&buf, someReader, passwords, nil)
-
-var decBuf bytes.Buffer
-meta, err := cipherlock.DecryptStreamMultiFromReader(&decBuf, bytes.NewReader(buf.Bytes()), []byte("bob"))
-// meta is non-nil when the source was encrypted with a FileMeta attached.
-```
-
-`EncryptMulti` (v0x04) is deprecated: it buffers the full plaintext in
-memory. Existing v0x04 files are still readable, but new code should
-target v0x07 via `EncryptStreamMulti`.
-
-#### Recovering FileMeta on decrypt
-
-The metadata-aware helpers return the `*FileMeta` attached at encrypt
-time, which is non-nil only for v0x06/v0x07 sources:
-
-```go
-meta, err := cipherlock.DecryptWithMeta(dst, src, password)        // all formats
-meta, err := cipherlock.DecryptFileWithMeta("file.enc", "out", pwd) // file variant
-meta, err := cipherlock.DecryptStreamMultiFromReader(dst, src, pwd) // v0x07 only
-```
-
-For v0x02-v0x05 sources the returned meta is nil. Use
-`ReadStreamMeta` / `ReadStreamMetaWithPassword` for streaming inspection
-of the header without performing a full decrypt.
-
-### Encrypted-metadata streaming (v0x06)
-
-When you need to keep the original filename and size confidential, use the v0x06
-format. The metadata is stored as an encrypted chunk so it is not visible in the
-file without the password.
-
-```go
-cfg := &cipherlock.Config{
-    SaltLen:   16,
-    Time:      3,
-    Memory:    64 * 1024,
-    Threads:   4,
-    KeyLen:    32,
-    ChunkSize: 64 * 1024,
-    FileMeta: &cipherlock.FileMeta{
-        Name:    "secret-document.bin",
-        Size:    1024,
-        ModTime: time.Now(),
-    },
-}
-
-var buf bytes.Buffer
-if err := cipherlock.EncryptStreamV2(&buf, src, password, cfg); err != nil {
-    return err
-}
-
-// Decrypting recovers the metadata:
-var dec bytes.Buffer
-meta, err := cipherlock.DecryptStreamV2(&dec, &buf, password)
-// meta.Name == "secret-document.bin", meta.Size == 1024, etc.
-```
-
-Use `cipherlock.ReadStreamMetaWithPassword(r, password)` to read just the
-metadata without streaming the rest of the file. For v0x05 files the password
-is unused and the cleartext metadata is returned; for v0x06/v0x07 the password
-and KDF are required to unseal the metadata chunk.
-
-`ReadStreamMeta` (no password) still works for v0x05 files; for v0x06/v0x07
-files it returns `cipherlock.ErrEncryptedMeta`.
+Full library documentation at [pkg.go.dev](https://pkg.go.dev/github.com/valonmulolli/cipherlock).
 
 ## File format
 
-cipherlock uses a self-describing binary format with versioned headers (v0x02–v0x08). Wire-level specifications for each version and the ASCII-armor format are documented in the [package documentation](https://pkg.go.dev/github.com/valonmulolli/cipherlock/cipherlock).
+Self-describing binary format with versioned headers (v0x02-v0x08). Wire-level
+specifications are documented in the [package documentation](https://pkg.go.dev/github.com/valonmulolli/cipherlock/cipherlock).
 
 ## Security
 
-> 📖 Full threat model, cryptographic design, and responsible disclosure process
-documented in [SECURITY.md](SECURITY.md).
-
-### Key derivation
-
-cipherlock uses Argon2id, the current state of the art in password-based key derivation. It is memory-hard, meaning an attacker needs a proportionally large amount of memory to attempt each password guess, making GPU and ASIC acceleration impractical.
-
-Default parameters (time=3, memory=64MB, threads=4) follow the OWASP Password Storage Cheat Sheet recommendations for 2024+. For higher security environments, increase the Memory parameter to 128MB or 256MB.
-
-### Authenticated encryption
-
-AES-256-GCM provides both confidentiality and integrity. Any tampering with the ciphertext is detected during decryption, and the operation fails with an authentication error before any data is written.
-
-### Key memory zeroing
-
-Derived keys, ECDH shared secrets, and wrapping keys are explicitly zeroed with `clear()` after the last cryptographic operation. This prevents secrets from lingering on the heap until garbage collection.
-
-### Nonce generation
-
-A fresh 12-byte random nonce is generated for every encryption operation using `crypto/rand`. Nonces never repeat with overwhelming probability.
-
-### Safe file operations
-
-When using `--in-place`, cipherlock writes to a temporary file first. Only after a successful encryption does it atomically replace the original. A failed operation never destroys the source data.
-
-After successful replacement, the original file is securely shredded (overwritten with random data, then zeros, then removed) to prevent recovery of the plaintext from disk blocks.
-
-### V1 format caveat
-
-The original file-encryption tool used PBKDF2 with only 4096 iterations and SHA-1. Files created with that tool remain decryptable via cipherlock, but re-encrypt them with the V2 format to get Argon2id protection.
-
-### Defensive bounds (OOM prevention)
-
-Every header field is validated against strict upper limits before allocation. This prevents a maliciously crafted file from triggering out-of-memory conditions during decryption:
-
-| Constant                  | Value      | Purpose                              |
-| ------------------------- | ---------- | ------------------------------------ |
-| `maxSaltLen`              | 1024 bytes | Salt length                          |
-| `maxKeyLen`               | 64 bytes   | Derived key length                   |
-| `maxChunkSize`            | 16 MB      | Per-chunk ciphertext length          |
-| `maxV04Body`              | 1 GiB      | v0x04 single-blob body               |
-| `maxMemory`               | 256 MiB    | Argon2id memory parameter            |
-| `maxTime`                 | 60         | Argon2id time parameter              |
-| `maxThreads`              | 32         | Argon2id threads                     |
-| `maxRecipients`           | 16         | Password-based multi-recipient count |
-| `maxAsymmetricRecipients` | 64         | X25519 asymmetric recipient count    |
-
-## Threat model
-
-cipherlock is designed to protect files at rest against an attacker who obtains
-a copy of the encrypted file but does not know the password. The threat model
-covers what cipherlock does, what it does not do, and the format-version
-trade-offs.
-
-### In scope
-
-- **Confidentiality against offline brute force.** Argon2id with default
-  parameters is memory-hard, raising the cost of each guess to the point where
-  GPU and ASIC attacks are uneconomical. Use a high-entropy password; a
-  short password is vulnerable regardless of KDF cost.
-- **Integrity and authenticity.** Every chunk is independently authenticated
-  with AES-256-GCM. Any bit flip, truncation, or chunk swap is detected before
-  any plaintext is written. The optional SHA-256 trailer detects bit-level
-  tampering at the plaintext level when enabled.
-- **Metadata confidentiality (v0x06 / v0x07).** The original filename, size,
-  and modification time are stored as an encrypted chunk in v0x06 and v0x07.
-  Without the password, an attacker cannot tell whether the file is, say, a
-  4 KiB text file or a 4 GiB video.
-- **Memory exhaustion via malicious input.** Salt length, key length, chunk
-  size, recipient count, and per-chunk ciphertext length are all bounded
-  before allocation. A malicious file cannot cause multi-gigabyte allocations.
-- **Atomic file replacement.** The `--in-place` CLI path writes to a
-  temporary file and only renames it into place after successful encryption.
-  The original is then shredded, so a crash mid-operation never destroys
-  the source data.
-
-### Out of scope
-
-- **Online attacks.** cipherlock does not throttle password attempts; if an
-  attacker can submit guesses to your decrypt endpoint, rate-limit at the
-  application layer.
-- **Side channels.** The library is not constant-time with respect to
-  password length, chunk contents, or decryption outcomes. It is suitable
-  for at-rest encryption, not for adversarial on-device use.
-- **Live system threats.** cipherlock does not protect against a keylogger
-  on the encrypting or decrypting machine, an OS-level memory dump, or a
-  running process that reads the plaintext. Use a trusted, isolated
-  environment for sensitive operations.
-- **Traffic analysis.** The file size after encryption is approximately
-  `plaintext_size + chunk_overhead`. For a v0x07 multi-recipient file the
-  size grows linearly with the number of recipients. An attacker who
-  observes the network sees file size and timing, not contents.
-- **V1 / PBKDF2+SHA-1 files.** The V1 decrypt path exists for backward
-  compatibility only. Re-encrypt with V2 or later to get Argon2id protection.
-
-### Format-version trade-offs
-
-| Version | Year | Compression | Use when                                                                | Avoid when                             |
-| ------- | ---- | ----------- | ----------------------------------------------------------------------- | -------------------------------------- |
-| V2/V3   | 2024 | ❌          | Single recipient, plaintext fits in memory, checksum not needed         | Files larger than a few hundred MB     |
-| V4      | 2024 | ❌          | Multi-recipient where all recipients can be enumerated at encrypt time  | Files larger than available RAM        |
-| V5      | 2024 | ❌          | Single recipient, streaming, large files; metadata can be public        | Filename/size are sensitive            |
-| V6      | 2026 | ✅          | Single recipient, streaming, large files, metadata must be confidential | You need zero-cost metadata inspection |
-| V7      | 2026 | ✅          | Multi-recipient, streaming, large files, metadata must be confidential  | Legacy interop with V4 is required     |
-| V8      | 2026 | ✅          | Multi-recipient, asymmetric X25519 keys, metadata must be confidential  | Recipients don't have key pairs        |
+Threat model, cryptographic design, defensive bounds, key memory zeroing, and
+responsible disclosure process are documented in [SECURITY.md](SECURITY.md).
 
 ## Installation
 
-### Via Go install
-
     go install github.com/valonmulolli/cipherlock@latest
 
-### From source
-
-    git clone https://github.com/valonmulolli/cipherlock.git
-    cd cipherlock
-    go build -o cipherlock .
-
-### Prebuilt binaries
-
-Download the latest release for your platform from the [releases page](https://github.com/valonmulolli/cipherlock/releases). Binaries are available for Linux, macOS, and Windows (amd64 and arm64). Each release archive includes the binary, LICENSE, README, [SECURITY.md](SECURITY.md), and the [man page](cipherlock.1).
-
-## Demo
-
-![cipherlock v1.2.0 demo](demo.gif)
+Or download prebuilt binaries from the [releases page](https://github.com/valonmulolli/cipherlock/releases)
+(Linux, macOS, Windows; amd64 and arm64). Release archives include the binary,
+LICENSE, README, [SECURITY.md](SECURITY.md), [man page](cipherlock.1),
+and [CLI docs](docs/cli/).
 
 ## Development
 
     git clone https://github.com/valonmulolli/cipherlock.git
     cd cipherlock
     go test ./...
+
+Regenerate CLI documentation after changing commands or flags:
+
+    go run tools/gendocs/main.go
 
 ## License
 
