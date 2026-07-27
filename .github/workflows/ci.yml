@@ -8,14 +8,19 @@ on:
 
 jobs:
   ci:
+    strategy:
+      matrix:
+        go: ["1.24.x", "1.25.x"]
+      fail-fast: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: ${{ matrix.go }}
           check-latest: true
+          cache: true
 
       - name: Lint
         uses: golangci/golangci-lint-action@v7
@@ -25,8 +30,14 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Build
+        run: go build ./...
+
       - name: Test
         run: go test -race -count=1 -timeout=600s ./...
+
+      - name: Compression tests
+        run: go test -race -count=1 -timeout=300s -run 'Compression' ./...
 
       - name: Benchmark
         run: go test -bench=. -benchmem -count=1 -run='^$$' -timeout=600s ./cipherlock/...
