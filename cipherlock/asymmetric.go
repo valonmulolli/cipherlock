@@ -337,6 +337,10 @@ func EncryptAsymmetric(dst io.Writer, src io.Reader, recipients []*X25519Recipie
 	if cfg.FileMeta != nil {
 		flags |= flagHasMetadata
 	}
+	if cfg.Compression {
+		flags |= flagCompressed
+		src = compressReader(src)
+	}
 
 	if err := writeAsymmetricHeader(dst, entries, flags); err != nil {
 		return err
@@ -508,6 +512,11 @@ func decryptAsymmetricBody(dst io.Writer, src io.Reader, fileKey []byte, flags b
 		}
 	}
 
+	var decompress func()
+	if flags&flagCompressed != 0 {
+		dst, decompress = decompressWriter(dst)
+	}
+
 	for {
 		var nonce [nonceSize]byte
 		if _, err := io.ReadFull(src, nonce[:]); err != nil {
@@ -554,6 +563,10 @@ func decryptAsymmetricBody(dst io.Writer, src io.Reader, fileKey []byte, flags b
 		if !bytes.Equal(expected[:], actual) {
 			return nil, ErrChecksumMismatch
 		}
+	}
+
+	if decompress != nil {
+		decompress()
 	}
 
 	return meta, nil
