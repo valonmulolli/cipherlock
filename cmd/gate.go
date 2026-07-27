@@ -63,12 +63,13 @@ Attempting to decrypt after the expiration will fail.`,
 		showStrength(password)
 
 		config := &cipherlock.Config{
-			SaltLen:  cipherlock.DefaultConfig.SaltLen,
-			Time:     cipherlock.DefaultConfig.Time,
-			Memory:   cipherlock.DefaultConfig.Memory,
-			Threads:  cipherlock.DefaultConfig.Threads,
-			KeyLen:   cipherlock.DefaultConfig.KeyLen,
-			Checksum: checksumFlag,
+			SaltLen:     cipherlock.DefaultConfig.SaltLen,
+			Time:        cipherlock.DefaultConfig.Time,
+			Memory:      cipherlock.DefaultConfig.Memory,
+			Threads:     cipherlock.DefaultConfig.Threads,
+			KeyLen:      cipherlock.DefaultConfig.KeyLen,
+			Checksum:    checksumFlag,
+			Compression: compressFlag,
 			FileMeta: &cipherlock.FileMeta{
 				Name:      info.Name(),
 				Size:      info.Size(),
@@ -168,6 +169,7 @@ func init() {
 	gateEncryptCmd.Flags().BoolVar(&genPassword, "gen-password", false, "generate a random password")
 	gateEncryptCmd.Flags().BoolVar(&forceEncrypt, "force", false, "overwrite existing output file without prompting")
 	gateEncryptCmd.Flags().BoolVar(&checksumFlag, "checksum", false, "enable integrity checksum")
+	gateEncryptCmd.Flags().BoolVar(&compressFlag, "compress", false, "compress data with zstd before encryption")
 
 	gateDecryptCmd.Flags().StringVar(&decryptOutput, "output", "", "output file path")
 	gateDecryptCmd.Flags().BoolVar(&inPlace, "in-place", false, "overwrite source on success")

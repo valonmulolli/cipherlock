@@ -37,6 +37,7 @@ var (
 	argonTime        uint32
 	argonMemory      uint32
 	argonThreads     uint8
+	compressFlag     bool
 )
 
 var encryptCmd = &cobra.Command{
@@ -135,12 +136,13 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 		}
 
 		config := &cipherlock.Config{
-			SaltLen:  cipherlock.DefaultConfig.SaltLen,
-			Time:     cipherlock.DefaultConfig.Time,
-			Memory:   cipherlock.DefaultConfig.Memory,
-			Threads:  cipherlock.DefaultConfig.Threads,
-			KeyLen:   cipherlock.DefaultConfig.KeyLen,
-			Checksum: checksumFlag,
+			SaltLen:     cipherlock.DefaultConfig.SaltLen,
+			Time:        cipherlock.DefaultConfig.Time,
+			Memory:      cipherlock.DefaultConfig.Memory,
+			Threads:     cipherlock.DefaultConfig.Threads,
+			KeyLen:      cipherlock.DefaultConfig.KeyLen,
+			Checksum:    checksumFlag,
+			Compression: compressFlag,
 		}
 
 		if profileName != "" {
@@ -449,6 +451,7 @@ func init() {
 	encryptCmd.Flags().Uint32Var(&argonTime, "time", 0, "Argon2id time parameter (overrides profile)")
 	encryptCmd.Flags().Uint32Var(&argonMemory, "memory", 0, "Argon2id memory in KB (overrides profile)")
 	encryptCmd.Flags().Uint8Var(&argonThreads, "threads", 0, "Argon2id parallelism (overrides profile)")
+	encryptCmd.Flags().BoolVar(&compressFlag, "compress", false, "compress data with zstd before encryption")
 	encryptCmd.RegisterFlagCompletionFunc("profile", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
 		return profileNames(), cobra.ShellCompDirectiveDefault
 	})
