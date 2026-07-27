@@ -54,6 +54,9 @@ func writeStreamV2Header(w io.Writer, password []byte, config *Config) ([]byte, 
 	if config.FileMeta != nil {
 		flags |= flagHasMetadata
 	}
+	if config.Compression {
+		flags |= flagCompressed
+	}
 	if err := write(flags); err != nil {
 		return nil, err
 	}
@@ -326,6 +329,11 @@ func decryptStreamV2(dst io.Writer, src io.Reader, password []byte) (*FileMeta, 
 		hasher = sha256.New()
 	}
 
+	var decompress func()
+	if sh.Flags&flagCompressed != 0 {
+		dst, decompress = decompressWriter(dst)
+	}
+
 	for {
 		var nonce [nonceSize]byte
 		if _, err := io.ReadFull(src, nonce[:]); err != nil {
@@ -372,6 +380,10 @@ func decryptStreamV2(dst io.Writer, src io.Reader, password []byte) (*FileMeta, 
 		}
 	}
 
+	if decompress != nil {
+		decompress()
+	}
+
 	return meta, nil
 }
 
@@ -409,6 +421,10 @@ func EncryptStreamV2(dst io.Writer, src io.Reader, password []byte, config *Conf
 	var hasher hash.Hash
 	if config.Checksum {
 		hasher = sha256.New()
+	}
+
+	if config.Compression {
+		src = compressReader(src)
 	}
 
 	key, err := writeStreamV2Header(dst, password, config)
