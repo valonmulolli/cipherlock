@@ -7,9 +7,42 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"io"
+	"sync"
 
+	"github.com/klauspost/compress/zstd"
 	"golang.org/x/crypto/argon2"
 )
+
+func compressReader(src io.Reader) io.Reader {
+	pr, pw := io.Pipe()
+	zw, _ := zstd.NewWriter(pw)
+	go func() {
+		_, err := io.Copy(zw, src)
+		zw.Close()
+		if err != nil {
+			pw.CloseWithError(err)
+		} else {
+			pw.Close()
+		}
+	}()
+	return pr
+}
+
+func decompressWriter(dst io.Writer) (io.Writer, func()) {
+	pr, pw := io.Pipe()
+	zr, _ := zstd.NewReader(pr)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		io.Copy(dst, zr)
+		zr.Close()
+		wg.Done()
+	}()
+	return pw, func() {
+		pw.Close()
+		wg.Wait()
+	}
+}
 
 // Encrypt encrypts data read from src using password and writes ciphertext to dst.
 // It is a convenience wrapper around EncryptStream and always produces the streaming
