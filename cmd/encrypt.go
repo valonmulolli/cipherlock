@@ -208,7 +208,7 @@ When <path> is "-", read from stdin and write encrypted data to stdout.`,
 				}
 				dest := outputPath
 				if dest == "" {
-					dest = args[0] + ".cipherlock"
+					dest = strings.TrimRight(args[0], "/\\") + ".cipherlock"
 				}
 				if !forceEncrypt {
 					if _, err := os.Stat(dest); err == nil {
