@@ -358,6 +358,7 @@ func init() {
 		printCmd("gate", "Time-gated encrypt/decrypt")
 
 		printSection("Key Management:")
+		printCmd("key fingerprint <pubkey>", "Display public key fingerprint")
 		printCmd("config", "Manage configuration profiles")
 		printCmd("show-profile <name>", "Display a configuration profile")
 
