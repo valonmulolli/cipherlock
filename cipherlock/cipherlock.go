@@ -13,12 +13,40 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
+// Pool of 32KB buffers reused by io.CopyBuffer in compress/decompress goroutines.
+var copyBufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 32*1024)
+		return &b
+	},
+}
+
+// Pools for zstd encoder and decoder instances to reuse their internal buffers
+// (window size ~8MB, hash tables, etc.) across encrypt/decrypt operations.
+var zstdEncoderPool sync.Pool
+
+func getZstdEncoder(w io.Writer) *zstd.Encoder {
+	if enc, ok := zstdEncoderPool.Get().(*zstd.Encoder); ok {
+		enc.Reset(w)
+		return enc
+	}
+	enc, _ := zstd.NewWriter(w, zstd.WithEncoderConcurrency(1))
+	return enc
+}
+
+func putZstdEncoder(enc *zstd.Encoder) {
+	enc.Close()
+	zstdEncoderPool.Put(enc)
+}
+
 func compressReader(src io.Reader) io.Reader {
 	pr, pw := io.Pipe()
-	zw, _ := zstd.NewWriter(pw)
+	zw := getZstdEncoder(pw)
 	go func() {
-		_, err := io.Copy(zw, src)
-		zw.Close()
+		buf := copyBufPool.Get().(*[]byte)
+		_, err := io.CopyBuffer(zw, src, *buf)
+		copyBufPool.Put(buf)
+		putZstdEncoder(zw)
 		if err != nil {
 			pw.CloseWithError(err)
 		} else {
@@ -30,11 +58,13 @@ func compressReader(src io.Reader) io.Reader {
 
 func decompressWriter(dst io.Writer) (io.Writer, func()) {
 	pr, pw := io.Pipe()
-	zr, _ := zstd.NewReader(pr)
+	zr, _ := zstd.NewReader(pr, zstd.WithDecoderConcurrency(1))
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
-		io.Copy(dst, zr)
+		buf := copyBufPool.Get().(*[]byte)
+		io.CopyBuffer(dst, zr, *buf)
+		copyBufPool.Put(buf)
 		zr.Close()
 		wg.Done()
 	}()
