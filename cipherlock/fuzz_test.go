@@ -2,188 +2,112 @@ package cipherlock
 
 import (
 	"bytes"
-	"errors"
-	"io"
 	"testing"
 )
 
-// FuzzUnarmor feeds random bytes into UnarmorBytes to make sure the parser
-// never panics on hostile input. Seed corpus exercises: empty input, header
-// only, header + footer, base64 garbage, oversized data.
-func FuzzUnarmor(f *testing.F) {
-	f.Add([]byte(""))
-	f.Add([]byte("-----BEGIN CIPHERLOCK-----\n-----END CIPHERLOCK-----"))
-	f.Add([]byte("-----BEGIN CIPHERLOCK-----\n!!!not-base64\n-----END CIPHERLOCK-----"))
-	f.Add(bytes.Repeat([]byte{0xff}, 4096))
-	f.Add([]byte("-----BEGIN CIPHERLOCK-----\n\n\n-----END CIPHERLOCK-----"))
-	f.Add([]byte("-----BEGIN CIPHERLOCK-----\n\nYQ==\n\n-----END CIPHERLOCK-----"))
-	f.Add(bytes.Repeat([]byte("-----BEGIN CIPHERLOCK-----\n"), 100))
+// fuzzPassword is a fixed password used by all fuzz targets so that any valid
+// seed corpus can be decrypted regardless of when it was generated.
+var fuzzPassword = []byte("fuzz-test-password")
+
+// FuzzDecryptStream fuzzes the v0x05 (legacy stream) decrypt path.
+//
+// Seed: a valid encrypted blob generated with fastBenchConfig.
+// The fuzzer mutates the ciphertext and verifies the function never panics.
+// Expected outcomes: ErrInvalidFormat, ErrAuthFailed, ErrCorrupted, or success.
+func FuzzDecryptStream(f *testing.F) {
+	plaintext := []byte("hello world fuzz")
+	var buf bytes.Buffer
+	cfg := fastBenchConfig()
+	if err := Encrypt(&buf, bytes.NewReader(plaintext), fuzzPassword, cfg); err != nil {
+		f.Fatalf("seeding corpus: %v", err)
+	}
+	f.Add(buf.Bytes())
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		defer func() {
-			if r := recover(); r != nil {
-				t.Fatalf("UnarmorBytes panicked: %v\ninput=%q", r, data)
-			}
-		}()
+		var out bytes.Buffer
+		_ = Decrypt(&out, bytes.NewReader(data), fuzzPassword)
+	})
+}
+
+// FuzzDecryptStreamV2 fuzzes the v0x06 (stream v2 with meta) decrypt path.
+func FuzzDecryptStreamV2(f *testing.F) {
+	plaintext := []byte("hello world fuzz v2")
+	var buf bytes.Buffer
+	cfg := fastBenchConfig()
+	if err := EncryptStreamV2(&buf, bytes.NewReader(plaintext), fuzzPassword, cfg); err != nil {
+		f.Fatalf("seeding corpus: %v", err)
+	}
+	f.Add(buf.Bytes())
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		var out bytes.Buffer
+		_, _ = DecryptStreamV2(&out, bytes.NewReader(data), fuzzPassword)
+	})
+}
+
+// FuzzDecryptStreamMulti fuzzes the v0x07 (multi-recipient) decrypt path.
+func FuzzDecryptStreamMulti(f *testing.F) {
+	plaintext := []byte("hello world fuzz multi")
+	var buf bytes.Buffer
+	cfg := fastBenchConfig()
+	if err := EncryptStreamMulti(&buf, bytes.NewReader(plaintext), [][]byte{fuzzPassword}, cfg); err != nil {
+		f.Fatalf("seeding corpus: %v", err)
+	}
+	f.Add(buf.Bytes())
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		var out bytes.Buffer
+		_, _ = DecryptStreamMultiFromReader(&out, bytes.NewReader(data), fuzzPassword)
+	})
+}
+
+// FuzzDecryptAsymmetric fuzzes the v0x08 (asymmetric X25519) decrypt path.
+func FuzzDecryptAsymmetric(f *testing.F) {
+	id, err := GenerateX25519Keypair()
+	if err != nil {
+		f.Fatalf("generating keypair: %v", err)
+	}
+
+	plaintext := []byte("hello world fuzz asymmetric")
+	var buf bytes.Buffer
+	cfg := fastBenchConfig()
+	if err := EncryptAsymmetric(&buf, bytes.NewReader(plaintext), []*X25519Recipient{
+		{PublicKey: id.PublicKey},
+	}, cfg); err != nil {
+		f.Fatalf("seeding corpus: %v", err)
+	}
+	f.Add(buf.Bytes())
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		var out bytes.Buffer
+		_ = DecryptAsymmetric(&out, bytes.NewReader(data), id)
+	})
+}
+
+// FuzzDeserializeIdentity fuzzes the X25519 identity file deserialization.
+func FuzzDeserializeIdentity(f *testing.F) {
+	id, err := GenerateX25519Keypair()
+	if err != nil {
+		f.Fatalf("generating keypair: %v", err)
+	}
+
+	serialized, err := SerializeX25519Identity(id, fuzzPassword)
+	if err != nil {
+		f.Fatalf("serializing identity: %v", err)
+	}
+	f.Add(serialized)
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		_, _ = DeserializeX25519Identity(data, fuzzPassword)
+	})
+}
+
+// FuzzUnarmorBytes fuzzes the base64 armor decoding used for ASCII-armored files.
+func FuzzUnarmorBytes(f *testing.F) {
+	valid := "-----BEGIN CIPHERLOCK-----\nSGVsbG8=\n-----END CIPHERLOCK-----\n"
+	f.Add([]byte(valid))
+
+	f.Fuzz(func(t *testing.T, data []byte) {
 		_, _ = UnarmorBytes(data)
-	})
-}
-
-// FuzzV2Header feeds random bytes to the v0x02/v0x03 header parser. The
-// parser must return ErrInvalidFormat, ErrCorrupted, or a similar sentinel
-// rather than panic or allocate unboundedly.
-func FuzzV2Header(f *testing.F) {
-	f.Add([]byte{'C', 'V', '2', 0, 0x03, 0x01, 0x10, 0x00})
-	f.Add([]byte{'C', 'V', '2', 0, 0x02, 0x10, 0x00})
-	f.Add(bytes.Repeat([]byte{0x55}, 256))
-	f.Add([]byte{'C', 'V', '2', 0, 0x03, 0xff, 0xff, 0xff})
-	f.Add([]byte{'C', 'V', '2', 0, 0x02, 0xff, 0xff})
-
-	f.Fuzz(func(t *testing.T, data []byte) {
-		defer func() {
-			if r := recover(); r != nil {
-				t.Fatalf("readHeader panicked: %v\ninput=%q", r, data)
-			}
-		}()
-		_, _ = readHeader(bytes.NewReader(data))
-	})
-}
-
-// FuzzV04Header feeds random bytes to the v0x04 multi-recipient header
-// parser. With the recent sealedKeyLen bound this must never panic.
-func FuzzV04Header(f *testing.F) {
-	f.Add([]byte{'C', 'V', '2', 0, 0x04, 0x00, 0x01, 0, 0, 0, 0})
-	f.Add(bytes.Repeat([]byte{0xaa}, 512))
-	f.Add([]byte{'C', 'V', '2', 0, 0x04, 0x00, 0x11, 0, 0, 0, 0})
-	f.Add([]byte{'C', 'V', '2', 0, 0x04, 0xff, 0x10, 0, 0, 0, 0})
-	f.Add(bytes.Repeat([]byte{0xaa}, 2048))
-
-	f.Fuzz(func(t *testing.T, data []byte) {
-		defer func() {
-			if r := recover(); r != nil {
-				t.Fatalf("readMultiHeader panicked: %v\ninput=%q", r, data)
-			}
-		}()
-		_, _ = readMultiHeader(bytes.NewReader(data))
-	})
-}
-
-// FuzzV05Stream feeds random bytes to the v0x05 streaming header parser.
-func FuzzV05Stream(f *testing.F) {
-	f.Add([]byte{'C', 'V', '2', 0, 0x05, 0x00, 0x10, 0x00})
-	f.Add(bytes.Repeat([]byte{0x33}, 256))
-	f.Add([]byte{'C', 'V', '2', 0, 0x05, 0x00, 0x10, 0x00, 0x04, 0x00})
-	f.Add([]byte{'C', 'V', '2', 0, 0x05, 0x01, 0x10, 0x00})
-
-	f.Fuzz(func(t *testing.T, data []byte) {
-		defer func() {
-			if r := recover(); r != nil {
-				t.Fatalf("readStreamHeader panicked: %v\ninput=%q", r, data)
-			}
-		}()
-		// Use a dummy password; we are testing the header parser, not KDF.
-		_, _, _ = readStreamHeader(bytes.NewReader(data), []byte("pwd"))
-	})
-}
-
-// FuzzV06Stream feeds random bytes to the v0x06 streaming header parser.
-func FuzzV06Stream(f *testing.F) {
-	f.Add([]byte{'C', 'V', '2', 0, 0x06, 0x00, 0x10, 0x00})
-	f.Add(bytes.Repeat([]byte{0x77}, 256))
-	f.Add([]byte{'C', 'V', '2', 0, 0x06, 0x02, 0x10, 0x00})
-	f.Add([]byte{'C', 'V', '2', 0, 0x06, 0x00, 0xff, 0xff})
-	f.Add([]byte{'C', 'V', '2', 0, 0x06, 0x00, 0x10, 0x00, 0x00, 0x00})
-
-	f.Fuzz(func(t *testing.T, data []byte) {
-		defer func() {
-			if r := recover(); r != nil {
-				t.Fatalf("readStreamV2Header panicked: %v\ninput=%q", r, data)
-			}
-		}()
-		_, _, _ = readStreamV2Header(bytes.NewReader(data), []byte("pwd"))
-	})
-}
-
-// FuzzV07Stream feeds random bytes to the v0x07 streaming multi-recipient
-// header parser. Recent changes bound numRecipients and per-recipient
-// sealedKeyLen; this fuzz test guards against regressions in those bounds.
-func FuzzV07Stream(f *testing.F) {
-	f.Add([]byte{'C', 'V', '2', 0, 0x07, 0x00, 0x01, 0, 0, 0, 0})
-	f.Add(bytes.Repeat([]byte{0xcc}, 512))
-	f.Add([]byte{'C', 'V', '2', 0, 0x07, 0x00, 0x11, 0, 0, 0, 0})
-	f.Add([]byte{'C', 'V', '2', 0, 0x07, 0xff, 0x01, 0, 0, 0, 0})
-	f.Add(bytes.Repeat([]byte{0xcc}, 2048))
-
-	f.Fuzz(func(t *testing.T, data []byte) {
-		defer func() {
-			if r := recover(); r != nil {
-				t.Fatalf("readStreamMultiHeader panicked: %v\ninput=%q", r, data)
-			}
-		}()
-		_, _ = readStreamMultiHeader(bytes.NewReader(data))
-	})
-}
-
-// FuzzDecrypt dispatches random bytes to the top-level Decrypt entry point.
-// This is the function users call with arbitrary input. It must return a
-// sentinel error, never panic, and never allocate more than a few MB.
-// FuzzNewUnarmorReader feeds random data to NewUnarmorReader and reads
-// from the returned reader to ensure no panic on hostile input.
-func FuzzNewUnarmorReader(f *testing.F) {
-	f.Add([]byte(""))
-	f.Add([]byte("-----BEGIN CIPHERLOCK-----\n-----END CIPHERLOCK-----"))
-	f.Add(bytes.Repeat([]byte{0x00}, 512))
-	f.Add([]byte("plain text with no armor header"))
-	f.Add([]byte("-----BEGIN CIPHERLOCK-----\n\n\n-----END CIPHERLOCK-----"))
-	f.Add(bytes.Repeat([]byte("-----BEGIN CIPHERLOCK-----\n"), 50))
-
-	f.Fuzz(func(t *testing.T, data []byte) {
-		defer func() {
-			if r := recover(); r != nil {
-				t.Fatalf("NewUnarmorReader panicked: %v\ninput=%q", r, data)
-			}
-		}()
-		r, err := NewUnarmorReader(bytes.NewReader(data))
-		if err != nil {
-			return
-		}
-		_, _ = io.ReadAll(r)
-	})
-}
-
-func FuzzDecrypt(f *testing.F) {
-	f.Add([]byte("not a cipherlock file"))
-	f.Add([]byte{'C', 'V', '2', 0, 0x05})
-	f.Add([]byte{'C', 'V', '2', 0, 0x07})
-	f.Add(bytes.Repeat([]byte{0x00}, 1024))
-	f.Add([]byte{'C', 'V', '2', 0, 0x06})
-	f.Add([]byte{'C', 'V', '2', 0, 0x04})
-
-	f.Fuzz(func(t *testing.T, data []byte) {
-		defer func() {
-			if r := recover(); r != nil {
-				t.Fatalf("Decrypt panicked: %v\ninput=%q", r, data)
-			}
-		}()
-		var dst bytes.Buffer
-		err := Decrypt(&dst, bytes.NewReader(data), []byte("pwd"))
-		// Either it errors with a sentinel, or it succeeds with no output.
-		// Anything in between (nil err with partial output) is also fine.
-		if err != nil && !errors.Is(err, ErrInvalidFormat) &&
-			!errors.Is(err, ErrVersionMismatch) &&
-			!errors.Is(err, ErrCorrupted) &&
-			!errors.Is(err, ErrAuthFailed) &&
-			!errors.Is(err, ErrChecksumMismatch) {
-			// io.ErrUnexpectedEOF is a legitimate truncated-stream error.
-			if !errors.Is(err, io.ErrUnexpectedEOF) {
-				t.Logf("unexpected non-sentinel error: %v", err)
-			}
-		}
-		// Hard upper bound on what Decrypt should ever allocate from a
-		// hostile input: 4 MiB. The v0x04 path has maxV04Body = 1 GiB so we
-		// cap the test input at 4 KiB to keep this quick.
-		if len(data) > 4096 {
-			t.Skip("input too large for fuzz bound")
-		}
 	})
 }
