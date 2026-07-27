@@ -24,6 +24,11 @@ archives:
     format_overrides:
       - goos: windows
         formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+      - SECURITY.md
+      - cipherlock.1
 
 changelog:
   sort: asc
