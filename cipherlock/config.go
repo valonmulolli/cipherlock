@@ -19,23 +19,25 @@ type FileMeta struct {
 // Profile defines Argon2id parameters that can be applied to a Config.
 // Fields are JSON-tagged for serialization.
 type Profile struct {
-	Time     uint32 `json:"time"`
-	Memory   uint32 `json:"memory"`
-	Threads  uint8  `json:"threads"`
-	Checksum bool   `json:"checksum"`
+	Time        uint32 `json:"time"`
+	Memory      uint32 `json:"memory"`
+	Threads     uint8  `json:"threads"`
+	Checksum    bool   `json:"checksum"`
+	Compression bool   `json:"compression"`
 }
 
 // Config holds encryption parameters including Argon2id key derivation settings,
-// checksum behavior, chunk size, and optional file metadata.
+// checksum behavior, chunk size, optional file metadata, and compression.
 type Config struct {
-	SaltLen   int
-	Time      uint32
-	Memory    uint32
-	Threads   uint8
-	KeyLen    uint32
-	Checksum  bool
-	ChunkSize int
-	FileMeta  *FileMeta
+	SaltLen     int
+	Time        uint32
+	Memory      uint32
+	Threads     uint8
+	KeyLen      uint32
+	Checksum    bool
+	ChunkSize   int
+	FileMeta    *FileMeta
+	Compression bool
 }
 
 // ApplyProfile applies non-zero Profile fields to the Config.
@@ -44,6 +46,7 @@ func (c *Config) ApplyProfile(p *Profile) {
 	if p == nil {
 		return
 	}
+	c.Compression = p.Compression
 	if p.Time != 0 {
 		c.Time = p.Time
 	}
