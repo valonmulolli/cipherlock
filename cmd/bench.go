@@ -250,10 +250,3 @@ func maxInt(a, b int) int {
 	return b
 }
 
-func sumCols(v [4]int) int {
-	n := 0
-	for _, x := range v {
-		n += x
-	}
-	return n + 2 // extra space for leading "  "
-}
