@@ -236,7 +236,7 @@ func EncryptStream(dst io.Writer, src io.Reader, password []byte, config *Config
 		config = DefaultConfig
 	}
 
-	if config.FileMeta != nil {
+	if config.FileMeta != nil || config.Compression {
 		return EncryptStreamV2(dst, src, password, config)
 	}
 
