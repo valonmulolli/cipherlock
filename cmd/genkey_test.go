@@ -18,12 +18,12 @@ func TestGenKeyOutputFiles(t *testing.T) {
 		genkeyPassphraseFile = origPass
 	}()
 
-	if err := genKeyCmd.RunE(genKeyCmd, nil); err != nil {
+	if err := genKeyCmd.RunE(genKeyCmd, []string{"testkey"}); err != nil {
 		t.Fatalf("generate-keypair failed: %v", err)
 	}
 
-	identityPath := filepath.Join(dir, "cipherlock.identity")
-	pubPath := filepath.Join(dir, "cipherlock.pub")
+	identityPath := filepath.Join(dir, "testkey.identity")
+	pubPath := filepath.Join(dir, "testkey.pub")
 
 	if _, err := os.Stat(identityPath); os.IsNotExist(err) {
 		t.Fatal("identity file not created")

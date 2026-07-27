@@ -168,11 +168,16 @@ Additional flags: `--output`, `--in-place`, `--force` (overwrite without prompt)
 
 ### Generate X25519 key pair
 
-    cipherlock dial --output-dir ~/.cipherlock
+    cipherlock dial mykey
 
-Creates `cipherlock.identity` (private key, armored) and `cipherlock.pub` (public key, base64). Protect the identity with a passphrase:
+Creates `mykey.identity` (private key, armored) and `mykey.pub` (public key, base64) in the current directory.
+Use `--output-dir` to write to a different directory:
 
-    cipherlock dial --passphrase-file ~/.secrets/identity-pass.txt
+    cipherlock dial mykey --output-dir ~/.cipherlock
+
+Protect the identity with a passphrase:
+
+    cipherlock dial mykey --passphrase-file ~/.secrets/identity-pass.txt
 
 ### Asymmetric encryption (X25519 public key)
 

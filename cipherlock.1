@@ -48,6 +48,7 @@ The plaintext streams through memory.
 .It Cm dial
 Generate an X25519 key pair for asymmetric encryption.
 The private key can be passphrase-protected with Argon2id + AES-256-GCM.
+Accepts an optional name argument for the key file prefix.
 .It Cm tumbler
 Display metadata about an encrypted file without decrypting it.
 Shows format version, KDF parameters, and (when available) the encrypted
@@ -349,12 +350,23 @@ Encrypts the file so it can only be decrypted within 7 days.
 .Pp
 Decrypts and re-encrypts with a new password.
 .Ss Generate a Key Pair
-.Dl $ cipherlock dial -o ./mykeys
+.Dl $ cipherlock dial mykey
 .Pp
 Creates
-.Pa mykeys/cipherlock.identity
+.Pa mykey.identity
 and
-.Pa mykeys/cipherlock.pub .
+.Pa mykey.pub
+in the current directory.
+.Pp
+Use
+.Fl -output-dir
+to write to a specific directory:
+.Dl $ cipherlock dial -o ./mykeys mykey
+.Pp
+Creates
+.Pa mykeys/mykey.identity
+and
+.Pa mykeys/mykey.pub .
 .Ss Check Password
 .Dl $ cipherlock click secret.encrypted
 .Ss Benchmark KDF Parameters

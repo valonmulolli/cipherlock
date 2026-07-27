@@ -16,7 +16,7 @@ var genkeyDir string
 var genkeyPassphraseFile string
 
 var genKeyCmd = &cobra.Command{
-	Use:   "dial",
+	Use:   "dial <name>",
 	Short: "Generate an X25519 encryption key pair",
 	Long: `Generate a new X25519 key pair for asymmetric encryption.
 
@@ -27,25 +27,26 @@ it and can be shared with anyone who needs to encrypt files for you.
 Use --recipient-pubkey <pubkey-file> with the encrypt command and
 --identity <identity-file> with the decrypt command.
 
-By default, keys are written to the current directory as:
+Keys are written to the current directory as:
   <name>.identity   (private key, armored)
   <name>.pub        (public key, base64)`,
-	Args: cobra.NoArgs,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id, err := cipherlock.GenerateX25519Keypair()
 		if err != nil {
 			return fmt.Errorf("generating key pair: %w", err)
 		}
 
-		outDir := genkeyDir
-		if outDir == "" {
-			outDir = "."
+		// Use the name argument as the base (may include a directory path).
+		// --output-dir overrides just the directory portion.
+		base := args[0]
+		if genkeyDir != "" {
+			// --output-dir sets the directory; args[0] is just the filename stem.
+			base = filepath.Join(genkeyDir, filepath.Base(args[0]))
 		}
-		if err := os.MkdirAll(outDir, 0700); err != nil {
+		if err := os.MkdirAll(filepath.Dir(base), 0700); err != nil {
 			return err
 		}
-
-		base := filepath.Join(outDir, "cipherlock")
 		identityPath := base + ".identity"
 		pubPath := base + ".pub"
 
