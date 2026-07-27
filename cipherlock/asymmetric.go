@@ -310,6 +310,16 @@ func EncryptAsymmetric(dst io.Writer, src io.Reader, recipients []*X25519Recipie
 	if _, err := io.ReadFull(rand.Reader, fileKey); err != nil {
 		return err
 	}
+	defer clear(fileKey)
+
+	for i, rec := range recipients {
+		if rec == nil {
+			return fmt.Errorf("cipherlock: nil recipient at index %d", i)
+		}
+		if len(rec.PublicKey) != x25519PublicKeySize {
+			return fmt.Errorf("cipherlock: invalid recipient public key length at index %d", i)
+		}
+	}
 
 	entries := make([]asymmetricRecipientEntry, len(recipients))
 	for i, rec := range recipients {
@@ -501,12 +511,12 @@ func decryptAsymmetricBody(dst io.Writer, src io.Reader, fileKey []byte, flags b
 	for {
 		var nonce [nonceSize]byte
 		if _, err := io.ReadFull(src, nonce[:]); err != nil {
-			return nil, ErrInvalidFormat
+			return nil, ErrCorrupted
 		}
 
 		var ctLen uint32
 		if err := binary.Read(src, binary.LittleEndian, &ctLen); err != nil {
-			return nil, ErrInvalidFormat
+			return nil, ErrCorrupted
 		}
 		if ctLen == 0 {
 			break
@@ -518,7 +528,7 @@ func decryptAsymmetricBody(dst io.Writer, src io.Reader, fileKey []byte, flags b
 
 		ciphertext := make([]byte, ctLen)
 		if _, err := io.ReadFull(src, ciphertext); err != nil {
-			return nil, ErrInvalidFormat
+			return nil, ErrCorrupted
 		}
 
 		plaintext, err := aesgcm.Open(nil, nonce[:], ciphertext, nil)
