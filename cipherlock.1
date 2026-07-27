@@ -1,0 +1,364 @@
+.Dd July 27, 2025
+.Dt CIPHERLOCK 1
+.Os
+.Sh NAME
+.Nm cipherlock
+.Nd AES-256-GCM file encryption with Argon2id key derivation
+.Sh SYNOPSIS
+.Nm
+.Ar command
+.Op Ar flags
+.Op Ar path ...
+.Sh DESCRIPTION
+.Nm
+is a Go library and CLI tool for encrypting files and directories using
+AES-256-GCM authenticated encryption with Argon2id memory-hard key derivation.
+It supports password-based and X25519 asymmetric encryption, streaming for
+arbitrarily large files, multi-recipient encryption, and optional zstd
+compression.
+.Pp
+All cryptographic operations are performed in memory; no intermediate
+plaintext is written to disk unless explicitly requested.
+.Sh COMMANDS
+.Ss Operations
+.Bl -tag -width Ds
+.It Cm encrypt
+Encrypt a file, directory, or stdin stream.
+.Pp
+If
+.Ar path
+is a regular file, it is encrypted with AES-256-GCM.
+If
+.Ar path
+is a directory, it is archived (tar + gzip) before encryption.
+If
+.Ar path
+is
+.Sq - ,
+read from stdin and write encrypted output to stdout.
+.It Cm decrypt
+Decrypt a file or stdin stream.
+Supports all format versions (v0x02 through v0x08).
+.It Cm rotor
+Re-encrypt a file with a new password without decrypting to disk.
+The plaintext streams through memory.
+.El
+.Ss Themed
+.Bl -tag -width Ds
+.It Cm dial
+Generate an X25519 key pair for asymmetric encryption.
+The private key can be passphrase-protected with Argon2id + AES-256-GCM.
+.It Cm tumbler
+Display metadata about an encrypted file without decrypting it.
+Shows format version, KDF parameters, and (when available) the encrypted
+or cleartext filename and expiration time.
+.It Cm click
+Verify that a password is correct for an encrypted file without
+writing any output. Exits with status 0 on success, 1 on failure.
+.It Cm bombe
+Verify the embedded SHA-256 checksum of an encrypted file's plaintext
+without writing any output.
+.It Cm gate
+Time-gated encryption: encrypt a file with an expiration time.
+After the expiration, decryption fails.
+.El
+.Ss Key Management
+.Bl -tag -width Ds
+.It Cm config
+Manage configuration profiles for Argon2id parameters.
+Subcommands:
+.Cm set-profile ,
+.Cm list-profiles ,
+.Cm show-profile ,
+.Cm remove-profile .
+.It Cm show-profile
+Display a saved configuration profile.
+.El
+.Ss Utility
+.Bl -tag -width Ds
+.It Cm shred
+Securely delete files by overwriting with one pass of
+cryptographically random data followed by one pass of zeros.
+.It Cm completion
+Generate shell completion scripts for bash, zsh, fish, or powershell.
+.It Cm version
+Print version information.
+.El
+.Sh OPTIONS
+.Ss Global Flags
+.Bl -tag -width Ds
+.It Fl -in-place
+Overwrite the source file with the encrypted/decrypted output.
+The original is preserved as a
+.Pa .cipherlock-bak
+backup until the operation succeeds.
+.It Fl -keep
+When used with
+.Fl -in-place ,
+keep the original source file after successful encryption or decryption.
+.It Fl -backup
+When used with
+.Fl -in-place ,
+rename the original to
+.Pa .bak
+before writing.
+.It Fl -dry-run
+Validate arguments and print what would be done without writing any output.
+.It Fl -recursive
+Recursively process files in subdirectories (batch mode).
+.It Fl -include Ar glob
+Only process files matching the glob pattern (batch mode).
+.It Fl -exclude Ar glob
+Skip files matching the glob pattern (batch mode).
+.It Fl -quiet
+Suppress progress bars and KDF spinners; show compact status per file.
+.It Fl -color1 .. Fl -color6
+Set the color theme for output. Values 1-6 select predefined palettes.
+.El
+.Ss Encrypt Flags
+.Bl -tag -width Ds
+.It Fl -output Ar path , Fl o Ar path
+Write output to the specified path.
+.It Fl -out-dir Ar dir
+Write all outputs to the specified directory (batch mode).
+.It Fl -gen-password
+Generate a cryptographically random 64-character hex password
+and print it to stderr.
+.It Fl -armor
+Encode the encrypted output in base64 ASCII-armor format for
+sharing via text or email.
+.It Fl -compress
+Compress plaintext with zstd before encryption.
+Supported in v0x06+ formats. Auto-detected on decrypt.
+.It Fl -checksum
+Embed a SHA-256 checksum of the plaintext. Verified on decrypt.
+.It Fl -key-file Ar path
+Read the password from a file instead of prompting interactively.
+.It Fl -keychain
+Read the password from the system keychain.
+.It Fl -password-env Ar var
+Read the password from the specified environment variable.
+.It Fl -password-fd Ar n
+Read the password from the specified file descriptor number
+(e.g., 0 for stdin pipe).
+.It Fl -password-stdin
+Read the password from stdin interactively.
+.It Fl -recipient Ar pwd
+Add an additional recipient password (multi-recipient mode).
+Can be specified multiple times.
+.It Fl -recipient-pubkey Ar path
+Encrypt to the specified X25519 public key (asymmetric mode).
+Can be specified multiple times.
+.It Fl -identity Ar path
+Use the specified identity private key for asymmetric decryption.
+Accepts cipherlock identity files and Ed25519 SSH private keys.
+.It Fl -profile Ar name
+Use a saved configuration profile for KDF parameters.
+.It Fl -time Ar n
+Argon2id time parameter (overrides profile).
+.It Fl -memory Ar kb
+Argon2id memory in KiB (overrides profile).
+.It Fl -threads Ar n
+Argon2id parallelism (overrides profile).
+.It Fl -force
+Overwrite existing output file without prompting.
+.It Fl -jobs Ar n
+Encrypt or decrypt multiple files concurrently using n workers.
+.El
+.Ss Decrypt Flags
+.Bl -tag -width Ds
+.It Fl -output Ar path , Fl o Ar path
+Write decrypted output to the specified path.
+.It Fl -key-file Ar path
+Read the password from a file.
+.It Fl -password-env Ar var
+Read the password from an environment variable.
+.It Fl -password-fd Ar n
+Read the password from a file descriptor.
+.It Fl -password-stdin
+Read the password from stdin.
+.It Fl -ssh-privkey Ar path
+Use the specified Ed25519 SSH private key as the decryption identity.
+.It Fl -passphrase-file Ar path
+Read the identity key passphrase from the specified file.
+.It Fl -force
+Overwrite existing output file without prompting.
+.El
+.Ss Gate Flags
+.Bl -tag -width Ds
+.It Fl -expires-in Ar duration
+Set the expiration time for time-gated encryption.
+Format is a Go duration string (e.g.,
+.Sq 24h ,
+.Sq 168h ,
+.Sq 30m ).
+.It Fl -compress
+Compress plaintext with zstd before encryption.
+.It Fl -checksum
+Enable integrity checksum.
+.It Fl -gen-password
+Generate a random password.
+.It Fl -force
+Overwrite existing output file without prompting.
+.El
+.Ss Rotor (Re-key) Flags
+.Bl -tag -width Ds
+.It Fl -output Ar path , Fl o Ar path
+Write re-keyed output to the specified path.
+.It Fl -new-key-file Ar path
+Read the new password from a file.
+.It Fl -key-file Ar path
+Read the current password from a file.
+.It Fl -new-password-env Ar var
+Read the new password from an environment variable.
+.It Fl -new-password-fd Ar n
+Read the new password from a file descriptor.
+.It Fl -new-password-stdin
+Read the new password from stdin.
+.It Fl -force
+Overwrite existing output file without prompting.
+.El
+.Ss Shred Flags
+.Bl -tag -width Ds
+.It Fl -force
+Skip confirmation prompts.
+.El
+.Sh FORMAT REFERENCE
+Encrypted files begin with the 4-byte magic prefix
+.Sq CV2\e0
+followed by a version byte:
+.Pp
+.Bl -tag -width Ds -compact
+.It v0x02
+Legacy single-recipient format (non-streaming)
+.It v0x03
+Added optional SHA-256 checksum (non-streaming)
+.It v0x04
+Multi-recipient password-based (non-streaming, buffers in memory)
+.It v0x05
+Streaming format (no upper size limit, no metadata)
+.It v0x06
+Streaming format with encrypted metadata (filename, size, modtime)
+.It v0x07
+Streaming multi-recipient format
+.It v0x08
+Asymmetric X25519 format (ephemeral ECDH + HKDF + AES-256-GCM)
+.El
+.Pp
+When compression is enabled, the
+.Fl -compress
+flag sets the
+.Sq flagCompressed
+bit in the format header. Decryption auto-detects this bit and
+decompresses transparently.
+.Sh EXIT STATUS
+.Bl -tag -width Ds
+.It 0
+Success.
+.It 1
+General error (wrong password, corrupted data, I/O error, etc.).
+.El
+.Sh ENVIRONMENT
+.Bl -tag -width Ds
+.It Ev CIPHERLOCK_CONFIG
+Path to the configuration directory.
+Defaults to
+.Pa ~/.config/cipherlock .
+.El
+.Sh FILES
+.Bl -tag -width Ds
+.It Pa ~/.config/cipherlock/profiles.json
+Saved configuration profiles.
+.It Pa <file>.cipherlock-bak
+Backup created during
+.Fl -in-place
+operations.
+.It Pa <file>.cipherlock
+Default output extension for directory encryption and gate encryption.
+.It Pa <file>.encrypted
+Default output extension for file encryption.
+.El
+.Sh EXAMPLES
+.Ss Basic Encryption
+.Dl $ cipherlock encrypt document.pdf
+.Pp
+Encrypts
+.Pa document.pdf
+to
+.Pa document.pdf.encrypted .
+.Ss Decryption
+.Dl $ cipherlock decrypt document.pdf.encrypted
+.Pp
+Restores
+.Pa document.pdf .
+.Ss In-Place Encryption
+.Dl $ cipherlock encrypt --in-place document.pdf
+.Pp
+Encrypts the file and replaces the original. If the operation is
+interrupted, the original is preserved as
+.Pa document.pdf.cipherlock-bak .
+.Ss Encryption with Compression
+.Dl $ cipherlock encrypt --compress --checksum server.log
+.Pp
+Compresses the plaintext with zstd, encrypts it, and embeds a
+SHA-256 checksum. On decryption, compression and checksums are
+handled automatically.
+.Ss Multi-Recipient Encryption
+.Dl $ cipherlock encrypt --recipient-password "alice" --recipient-password "bob" report.pdf
+.Pp
+Encrypts the file so that either Alice or Bob can decrypt it with
+their respective password.
+.Ss Asymmetric Encryption
+.Dl $ cipherlock encrypt --recipient-pubkey alice.pub secret.txt
+.Pp
+Encrypts to Alice's X25519 public key. Alice decrypts with her
+identity private key.
+.Ss Time-Gated Encryption
+.Dl $ cipherlock gate encrypt --expires-in 168h contract.pdf
+.Pp
+Encrypts the file so it can only be decrypted within 7 days.
+.Ss Pipe Mode
+.Dl $ cat document.pdf | cipherlock encrypt --compress > document.enc
+.Dl $ cat document.enc | cipherlock decrypt > document.pdf
+.Ss Batch Encryption
+.Dl $ cipherlock encrypt --recursive --include '*.txt' ./docs/
+.Ss Re-key a File
+.Dl $ cipherlock rotor secret.encrypted
+.Pp
+Decrypts and re-encrypts with a new password.
+.Ss Generate a Key Pair
+.Dl $ cipherlock dial -o ./mykeys
+.Pp
+Creates
+.Pa mykeys/cipherlock.identity
+and
+.Pa mykeys/cipherlock.pub .
+.Ss Check Password
+.Dl $ cipherlock click secret.encrypted
+.El
+.Sh SEE ALSO
+.Xr openssl 1 ,
+.Xr age 1 ,
+.Xr gpg 1
+.Pp
+Full documentation and source code:
+.Pa https://github.com/valonmulolli/cipherlock
+.Sh AUTHORS
+.An Valon Mulolli Aq valon.mulolli@outlook.com
+.Sh CAVEATS
+As noted in
+.Pa SECURITY.md ,
+compression may leak information about the plaintext when an attacker
+controls part of the input (CRIME/BREACH class attacks). Do not use
+.Fl -compress
+when encrypting data that includes attacker-controlled content.
+.Pp
+On SSDs with wear-leveling, the
+.Cm shred
+command cannot guarantee that all copies of the data are overwritten.
+Full-disk encryption is recommended for SSD environments.
+.Pp
+The Argon2id KDF is intentionally slow (default ~2-10 seconds per key).
+Use
+.Cm config set-profile
+to tune parameters for your hardware.
