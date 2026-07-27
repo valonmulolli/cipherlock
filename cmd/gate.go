@@ -52,6 +52,10 @@ Attempting to decrypt after the expiration will fail.`,
 			return err
 		}
 
+		if encrypted, _ := cipherlock.IsEncrypted(srcPath); encrypted {
+			return fmt.Errorf("input %q is already encrypted; gate encrypt expects plaintext input", srcPath)
+		}
+
 		password, err := resolvePassword(passwordSource{
 			FD: passwordFD, Env: passwordEnv, KeyFile: keyFilePath,
 			Stdin: passwordStdin, GenPwd: genPassword, Label: "Enter password: ",
