@@ -85,7 +85,7 @@ func newHelpStyles() helpStyles {
 			Foreground(teal),
 		cmd: lipgloss.NewStyle().
 			Foreground(white).
-			Width(22),
+			Width(30),
 		desc: lipgloss.NewStyle().
 			Foreground(gray),
 		dim: lipgloss.NewStyle().
@@ -240,10 +240,10 @@ func init() {
 
 		padName := func(n string) string {
 			r := []rune(n)
-			if len(r) >= 22 {
-				return string(r[:22])
+			if len(r) >= 30 {
+				return string(r[:30])
 			}
-			return n + strings.Repeat(" ", 22-len(r))
+			return n + strings.Repeat(" ", 30-len(r))
 		}
 
 		scrambleLine := func(plain, styled string, speed time.Duration) {
