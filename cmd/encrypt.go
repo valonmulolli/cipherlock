@@ -317,6 +317,7 @@ func encryptStdin(passwords [][]byte, asymmetricRecipients []*cipherlock.X25519R
 
 	f, err := os.Create(out)
 	if err != nil {
+		stopKDF()
 		return err
 	}
 	defer f.Close()
@@ -380,6 +381,7 @@ func encryptFile(srcPath, dstPath string, info os.FileInfo, passwords [][]byte, 
 
 	destFile, err := os.Create(dstPath)
 	if err != nil {
+		stopKDF()
 		return err
 	}
 

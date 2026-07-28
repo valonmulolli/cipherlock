@@ -33,6 +33,7 @@ var (
 	color4    string // filled bar / gradient A (#32b8c6)
 	color5    string // empty bar (#d6d5d4)
 	color6    string // gradient B (#0f3639)
+	noColor   bool   // suppress all color / ANSI output
 )
 
 // Version is set at build time via -ldflags.
@@ -427,5 +428,6 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&color4, "color4", "#32b8c6", "color for filled bar")
 	rootCmd.PersistentFlags().StringVar(&color5, "color5", "#d6d5d4", "color for empty bar")
 	rootCmd.PersistentFlags().StringVar(&color6, "color6", "#0f3639", "color for gradient B")
+	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "disable ANSI color output")
 	rootCmd.AddCommand(versionCmd)
 }

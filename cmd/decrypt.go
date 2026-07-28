@@ -329,6 +329,7 @@ func decryptStdin(password []byte) error {
 
 	f, err := os.Create(out)
 	if err != nil {
+		stopKDF()
 		return err
 	}
 	defer f.Close()
@@ -360,7 +361,10 @@ func decryptDirSource(srcPath string, info os.FileInfo, password []byte) error {
 		}
 	}
 
-	if err := cipherlock.DecryptDir(srcPath, dest, password); err != nil {
+	stopKDF := showKDF()
+	err := cipherlock.DecryptDir(srcPath, dest, password)
+	stopKDF()
+	if err != nil {
 		if isAuthError(err) {
 			return errors.New("decryption failed: wrong password or corrupted data")
 		}

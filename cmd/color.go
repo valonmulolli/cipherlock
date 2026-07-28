@@ -5,7 +5,10 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 )
+
+var warnOnce sync.Once
 
 type rgb struct {
 	r, g, b uint8
@@ -40,6 +43,9 @@ func ansiReset() string {
 }
 
 func disabledColor() bool {
+	if noColor {
+		return true
+	}
 	_, ok := os.LookupEnv("NO_COLOR")
 	return ok
 }
@@ -50,6 +56,9 @@ func resolveColor(hex string) string {
 	}
 	c, err := hexToRGB(hex)
 	if err != nil {
+		warnOnce.Do(func() {
+			fmt.Fprintf(os.Stderr, "cipherlock: invalid color %q, using default\n", hex)
+		})
 		return ""
 	}
 	return ansiFg(c)
