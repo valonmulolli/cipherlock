@@ -1,9 +1,7 @@
 package cmd
 
 import (
-	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -472,17 +470,6 @@ func copyFile(src, dst string) error {
 
 	_, err = io.Copy(d, s)
 	return err
-}
-
-func generatePassword(length int) ([]byte, error) {
-	b := make([]byte, length)
-	if _, err := rand.Read(b); err != nil {
-		return nil, err
-	}
-	dst := make([]byte, hex.EncodedLen(len(b)))
-	hex.Encode(dst, b)
-	clear(b)
-	return dst, nil
 }
 
 func promptPassword(prompt string, confirm bool) ([]byte, error) {

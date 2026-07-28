@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"io"
 	"sync"
 
@@ -205,4 +207,19 @@ func decryptV2V3(dst io.Writer, src io.Reader, password []byte) error {
 	}
 
 	return nil
+}
+
+// GeneratePassword generates a cryptographically random hex-encoded password.
+// The length parameter controls the number of random bytes before hex encoding,
+// resulting in a password of length len*2 hex characters.
+// A length of 32 produces a 64-character hex string (256 bits of entropy).
+func GeneratePassword(length int) ([]byte, error) {
+	b := make([]byte, length)
+	if _, err := rand.Read(b); err != nil {
+		return nil, err
+	}
+	dst := make([]byte, hex.EncodedLen(len(b)))
+	hex.Encode(dst, b)
+	clear(b)
+	return dst, nil
 }

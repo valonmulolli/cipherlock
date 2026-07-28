@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"golang.org/x/term"
+
+	"github.com/valonmulolli/cipherlock/cipherlock"
 )
 
 func readPasswordFromEnv(envVar string) ([]byte, error) {
@@ -100,7 +102,7 @@ func resolvePassword(src passwordSource) ([]byte, error) {
 		}
 		return bytes.TrimRight(pwd, "\n\r"), nil
 	case src.GenPwd:
-		pwd, err := generatePassword(32)
+		pwd, err := cipherlock.GeneratePassword(32)
 		if err != nil {
 			return nil, err
 		}
