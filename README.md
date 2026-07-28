@@ -122,6 +122,10 @@ Or download prebuilt binaries from the [releases page](https://github.com/valonm
 LICENSE, README, [SECURITY.md](SECURITY.md), and [CLI docs](docs/cli/).
 and [CLI docs](docs/cli/).
 
+## Demo
+
+![cipherlock demo](demo.gif)
+
 ## Development
 
     git clone https://github.com/valonmulolli/cipherlock.git
