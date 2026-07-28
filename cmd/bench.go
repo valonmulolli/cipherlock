@@ -209,18 +209,18 @@ func runBench(cmd *cobra.Command, _ []string) error {
 
 	// Optional: save the profile
 	if benchSave != "" {
-		store, err := loadProfileStore()
+		profiles, err := cipherlock.LoadProfiles()
 		if err != nil {
-			return fmt.Errorf("loading profile store: %w", err)
+			return fmt.Errorf("loading profiles: %w", err)
 		}
-		store.Profiles[benchSave] = cipherlock.Profile{
+		profiles[benchSave] = cipherlock.Profile{
 			Time:     best.Time,
 			Memory:   best.Memory,
 			Threads:  best.Threads,
 			Checksum: true,
 		}
-		if err := saveProfileStore(store); err != nil {
-			return fmt.Errorf("saving profile: %w", err)
+		if err := cipherlock.SaveProfiles(profiles); err != nil {
+			return fmt.Errorf("saving profiles: %w", err)
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "\n✅ Profile %q saved.\n", benchSave)
 	}

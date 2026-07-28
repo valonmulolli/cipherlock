@@ -16,18 +16,18 @@ func TestProfileConcurrentSet(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			name := t.Name()
-			store, err := loadProfileStore()
+			profiles, err := cipherlock.LoadProfiles()
 			if err != nil {
 				errs <- err
 				return
 			}
-			store.Profiles[name] = cipherlock.Profile{
+			profiles[name] = cipherlock.Profile{
 				Time:     uint32(n + 1),
 				Memory:   65536,
 				Threads:  1,
 				Checksum: true,
 			}
-			if err := saveProfileStore(store); err != nil {
+			if err := cipherlock.SaveProfiles(profiles); err != nil {
 				errs <- err
 				return
 			}

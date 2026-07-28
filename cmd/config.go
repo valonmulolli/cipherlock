@@ -1,10 +1,8 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -34,13 +32,13 @@ var setProfileCmd = &cobra.Command{
 			Checksum: checksum,
 		}
 
-		store, err := loadProfileStore()
+		profiles, err := cipherlock.LoadProfiles()
 		if err != nil {
 			return err
 		}
 
-		store.Profiles[name] = profile
-		if err := saveProfileStore(store); err != nil {
+		profiles[name] = profile
+		if err := cipherlock.SaveProfiles(profiles); err != nil {
 			return err
 		}
 
@@ -54,17 +52,17 @@ var listProfilesCmd = &cobra.Command{
 	Short: "List all saved configuration profiles",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		store, err := loadProfileStore()
+		profiles, err := cipherlock.LoadProfiles()
 		if err != nil {
 			return err
 		}
 
-		if len(store.Profiles) == 0 {
+		if len(profiles) == 0 {
 			fmt.Println("no profiles configured")
 			return nil
 		}
 
-		for name, p := range store.Profiles {
+		for name, p := range profiles {
 			fmt.Printf("%s:\n", name)
 			fmt.Printf("  time:     %d\n", p.Time)
 			fmt.Printf("  memory:   %d KB\n", p.Memory)
@@ -81,9 +79,13 @@ var showProfileCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		profile, err := lookupProfile(name)
+		profiles, err := cipherlock.LoadProfiles()
 		if err != nil {
 			return err
+		}
+		profile, ok := profiles[name]
+		if !ok {
+			return fmt.Errorf("profile %q not found", name)
 		}
 		fmt.Printf("profile: %s\n", name)
 		fmt.Printf("  time:     %d\n", profile.Time)
@@ -100,17 +102,17 @@ var removeProfileCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		store, err := loadProfileStore()
+		profiles, err := cipherlock.LoadProfiles()
 		if err != nil {
 			return err
 		}
 
-		if _, ok := store.Profiles[name]; !ok {
+		if _, ok := profiles[name]; !ok {
 			return fmt.Errorf("profile %q not found", name)
 		}
 
-		delete(store.Profiles, name)
-		if err := saveProfileStore(store); err != nil {
+		delete(profiles, name)
+		if err := cipherlock.SaveProfiles(profiles); err != nil {
 			return err
 		}
 
@@ -119,88 +121,12 @@ var removeProfileCmd = &cobra.Command{
 	},
 }
 
-type profileStore struct {
-	Profiles map[string]cipherlock.Profile `json:"profiles"`
-}
-
-func profilePath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	dir := filepath.Join(home, ".config", "cipherlock")
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "profiles.json"), nil
-}
-
-func loadProfileStore() (*profileStore, error) {
-	path, err := profilePath()
-	if err != nil {
-		return &profileStore{Profiles: make(map[string]cipherlock.Profile)}, nil
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return &profileStore{Profiles: make(map[string]cipherlock.Profile)}, nil
-		}
-		return nil, err
-	}
-
-	var store profileStore
-	if err := json.Unmarshal(data, &store); err != nil {
-		return nil, err
-	}
-	if store.Profiles == nil {
-		store.Profiles = make(map[string]cipherlock.Profile)
-	}
-	return &store, nil
-}
-
-func saveProfileStore(store *profileStore) error {
-	path, err := profilePath()
-	if err != nil {
-		return err
-	}
-
-	data, err := json.MarshalIndent(store, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	// Write to a tempfile in the same directory then rename atomically,
-	// so a concurrent reader never sees a partially-written file.
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".profiles-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpName)
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		os.Remove(tmpName)
-		return err
-	}
-	return os.Chmod(path, 0600)
-}
-
 func lookupProfile(name string) (*cipherlock.Profile, error) {
-	store, err := loadProfileStore()
+	profiles, err := cipherlock.LoadProfiles()
 	if err != nil {
 		return nil, err
 	}
-	p, ok := store.Profiles[name]
+	p, ok := profiles[name]
 	if !ok {
 		return nil, fmt.Errorf("profile %q not found", name)
 	}
@@ -208,12 +134,12 @@ func lookupProfile(name string) (*cipherlock.Profile, error) {
 }
 
 func profileNames() []string {
-	store, err := loadProfileStore()
+	profiles, err := cipherlock.LoadProfiles()
 	if err != nil {
 		return nil
 	}
-	names := make([]string, 0, len(store.Profiles))
-	for name := range store.Profiles {
+	names := make([]string, 0, len(profiles))
+	for name := range profiles {
 		names = append(names, name)
 	}
 	return names
