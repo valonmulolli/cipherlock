@@ -31,6 +31,7 @@ archives:
       - SECURITY.md
       - cipherlock.1
       - docs/cli/*.md
+      - docs/lib/*.md
 
 changelog:
   sort: asc

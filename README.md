@@ -7,7 +7,6 @@
 [![Security](https://img.shields.io/badge/security-threat%20model-informational)](SECURITY.md)
 
 AES-256-GCM file encryption with Argon2id key derivation -- Go library and CLI tool.
-[Threat model & cryptographic design](SECURITY.md) · [man page](cipherlock.1) (`man -l cipherlock.1`) · [CLI reference](docs/cli/cipherlock.md)
 
 ## Features
 
@@ -30,6 +29,8 @@ AES-256-GCM file encryption with Argon2id key derivation -- Go library and CLI t
 - **Shell completion**: bash, zsh, fish, powershell
 - **Backward compatible**: decrypts V1 PBKDF2+SHA1 format
 - **Library + CLI dual use**: importable Go package with cobra CLI
+
+[Threat model & cryptographic design](SECURITY.md) · [CLI reference](docs/cli/cipherlock.md)
 
 ## Quick start
 
@@ -99,7 +100,8 @@ config := &cipherlock.Config{
 err := cipherlock.Encrypt(dst, src, password, config)
 ```
 
-Full library documentation at [pkg.go.dev](https://pkg.go.dev/github.com/valonmulolli/cipherlock).
+Full library documentation at [pkg.go.dev](https://pkg.go.dev/github.com/valonmulolli/cipherlock/cipherlock)
+and [docs/lib/library.md](docs/lib/library.md).
 
 ## File format
 
