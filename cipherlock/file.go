@@ -1,6 +1,7 @@
 package cipherlock
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"path/filepath"
@@ -125,6 +126,35 @@ func IsEncrypted(path string) (bool, error) {
 		return true, nil
 	}
 	return false, nil
+}
+
+// IsEncryptedReader checks whether the provided reader starts with a valid
+// cipherlock format header (binary magic or ASCII-armor). It consumes up to
+// the required bytes and returns a new reader that includes those bytes along
+// with the remaining stream, so callers must use the returned reader for
+// subsequent reads.
+//
+// This is useful for detecting cipherlock format in a stream without knowing
+// the format in advance:
+//
+//	ok, r, err := cipherlock.IsEncryptedReader(input)
+//	if err != nil { return err }
+//	if ok {
+//	    return cipherlock.Decrypt(dst, r, password)
+//	}
+//	// handle plaintext
+func IsEncryptedReader(r io.Reader) (bool, io.Reader, error) {
+	var header [4]byte
+	n, err := io.ReadFull(r, header[:])
+	if err != nil && err != io.ErrUnexpectedEOF {
+		return false, r, err
+	}
+	prefix := header[:n]
+	combined := io.MultiReader(bytes.NewReader(prefix), r)
+	if n < 4 {
+		return false, combined, nil
+	}
+	return magic == header, combined, nil
 }
 
 func defaultDecryptPath(source string) string {
