@@ -119,7 +119,7 @@ responsible disclosure process are documented in [SECURITY.md](SECURITY.md).
 
 Or download prebuilt binaries from the [releases page](https://github.com/valonmulolli/cipherlock/releases)
 (Linux, macOS, Windows; amd64 and arm64). Release archives include the binary,
-LICENSE, README, [SECURITY.md](SECURITY.md), [man page](cipherlock.1),
+LICENSE, README, [SECURITY.md](SECURITY.md), and [CLI docs](docs/cli/).
 and [CLI docs](docs/cli/).
 
 ## Development

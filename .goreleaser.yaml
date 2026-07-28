@@ -29,7 +29,6 @@ archives:
       - LICENSE
       - README.md
       - SECURITY.md
-      - cipherlock.1
       - docs/cli/*.md
       - docs/lib/*.md
 
