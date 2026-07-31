@@ -39,6 +39,7 @@ cipherlock gate decrypt [flags] <path>
       --exclude string   exclude files matching this glob pattern
       --include string   only process files matching this glob pattern
       --keep             keep the original file (opposite of --in-place)
+      --no-color         disable ANSI color output
       --quiet            suppress progress output
       --recursive        process directories recursively
 ```

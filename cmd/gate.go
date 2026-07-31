@@ -132,15 +132,9 @@ the decryption will fail.`,
 		}
 
 		tmp := dest + ".tmp"
-		meta, err := cipherlock.DecryptFileWithMeta(srcPath, tmp, password)
-		if err != nil {
+		if _, err := cipherlock.DecryptFileWithMeta(srcPath, tmp, password); err != nil {
 			os.Remove(tmp)
 			return err
-		}
-
-		if meta != nil && !meta.ExpiresAt.IsZero() && time.Now().After(meta.ExpiresAt) {
-			os.Remove(tmp)
-			return fmt.Errorf("file expired at %s", meta.ExpiresAt.Format(time.RFC3339))
 		}
 
 		if inPlace {

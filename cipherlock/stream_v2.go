@@ -151,7 +151,17 @@ func encryptStreamV2Meta(dst io.Writer, aesgcm cipher.AEAD, meta *FileMeta) erro
 	buf = append(buf, name...)
 	buf = binary.LittleEndian.AppendUint64(buf, uint64(meta.Size))
 	buf = binary.LittleEndian.AppendUint64(buf, uint64(meta.ModTime.UnixNano()))
-	buf = binary.LittleEndian.AppendUint64(buf, uint64(meta.ExpiresAt.UnixNano()))
+
+	// A zero ExpiresAt (no time gate) must be serialized as 0, not as
+	// time.Time{}.UnixNano(), which is a large negative value that would
+	// round-trip to a year-1754 timestamp in the past. Gates are always set
+	// in the future, so positive UnixNano values unambiguously denote a real
+	// expiry and 0 denotes "no expiry" on the read side.
+	var expNano int64
+	if !meta.ExpiresAt.IsZero() {
+		expNano = meta.ExpiresAt.UnixNano()
+	}
+	buf = binary.LittleEndian.AppendUint64(buf, uint64(expNano))
 
 	nonce := make([]byte, nonceSize)
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
@@ -222,7 +232,12 @@ func decryptStreamV2Meta(r io.Reader, aesgcm cipher.AEAD) (*FileMeta, error) {
 
 	if len(plaintext) >= off+24 {
 		expNano := int64(binary.LittleEndian.Uint64(plaintext[off+16 : off+24]))
-		if expNano != 0 {
+		// Only positive values denote a real expiry. 0 is the "no gate"
+		// sentinel written since the fix, and negative values are the
+		// zero-time artifact written by older versions (time.Time{}.UnixNano())
+		// that round-tripped to year 1754; both mean "no expiry". Real gates
+		// are always set in the future, so their UnixNano is positive.
+		if expNano > 0 {
 			meta.ExpiresAt = time.Unix(0, expNano)
 		}
 	}
@@ -301,6 +316,16 @@ func encryptStreamV2(dst io.Writer, src io.Reader, key []byte, chunkSize int, me
 // decrypted as metadata; otherwise data chunks follow directly. The optional checksum
 // is verified when present in the flags.
 func decryptStreamV2(dst io.Writer, src io.Reader, password []byte) (*FileMeta, error) {
+	return decryptStreamV2Impl(dst, src, password, false)
+}
+
+// decryptStreamV2Impl is the shared v0x06 decrypt implementation. When
+// enforceExpiry is true it returns ErrExpired right after the authenticated
+// metadata chunk is parsed and before any plaintext chunk is written, so an
+// expired time-gated file never leaks plaintext to dst. The exported
+// DecryptStreamV2 passes false: it is the documented escape hatch for
+// recovering the contents of expired files you authored.
+func decryptStreamV2Impl(dst io.Writer, src io.Reader, password []byte, enforceExpiry bool) (*FileMeta, error) {
 	sh, key, err := readStreamV2Header(src, password)
 	if err != nil {
 		return nil, err
@@ -321,6 +346,9 @@ func decryptStreamV2(dst io.Writer, src io.Reader, password []byte) (*FileMeta, 
 		meta, err = decryptStreamV2Meta(src, aesgcm)
 		if err != nil {
 			return nil, err
+		}
+		if enforceExpiry && meta != nil && !meta.ExpiresAt.IsZero() && time.Now().After(meta.ExpiresAt) {
+			return nil, ErrExpired
 		}
 	}
 

@@ -183,6 +183,15 @@ blocks and stores them in their original form).
    when encrypting data that includes attacker-controlled content in
    the same compression context.
 
+7. **Time-gated files are not cryptographically enforced**: An expired
+   file's expiration time is authenticated metadata, and the high-level
+   decrypt entry points (`Decrypt`, `DecryptFile`, `DecryptWithMeta`)
+   refuse to decrypt expired files with `ErrExpired`. However, anyone who
+   holds the password can still recover the contents using the low-level
+   streaming functions (`DecryptStreamV2`, `DecryptStreamMultiFromReader`),
+   which intentionally bypass the check for archival recovery. Treat
+   expiration as a policy reminder, not a cryptographic guarantee.
+
 ## Security-Relevant Configuration
 
 | Config field   | Default         | Recommendation                                        |

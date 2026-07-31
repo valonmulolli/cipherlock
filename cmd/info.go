@@ -17,11 +17,11 @@ var infoCmd = &cobra.Command{
 	Short: "Display encrypted file metadata",
 	Long: `Show metadata about an encrypted cipherlock file.
 
-Without --password, displays basic information (format version, whether
-the file is encrypted, and cleartext metadata if available).
+Without a password source, displays basic information (format version,
+whether the file is encrypted, and cleartext metadata if available).
 
-With --password, also displays the stored filename, original size, and
-modification time.`,
+With --password-env, --password-fd, or --password-stdin, also displays the
+stored filename, original size, and modification time.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := args[0]
@@ -58,7 +58,21 @@ modification time.`,
 
 		meta, err := cipherlock.ReadStreamMeta(r)
 		if err != nil {
-			if errors.Is(err, cipherlock.ErrEncryptedMeta) && infoPassword != "" {
+			if errors.Is(err, cipherlock.ErrEncryptedMeta) {
+				if infoPasswordEnv == "" && infoPasswordFD == "" && !infoPasswordStdin {
+					fmt.Fprintln(cmd.OutOrStdout(), "Metadata: encrypted (use --password-env, --password-fd, or --password-stdin to view)")
+					return nil
+				}
+				password, perr := resolvePassword(passwordSource{
+					FD:    infoPasswordFD,
+					Env:   infoPasswordEnv,
+					Stdin: infoPasswordStdin,
+					Label: "Enter password: ",
+				})
+				if perr != nil {
+					return fmt.Errorf("reading metadata: %w", perr)
+				}
+				defer clear(password)
 				meta, err = func() (*cipherlock.FileMeta, error) {
 					f2, e := os.Open(path)
 					if e != nil {
@@ -83,16 +97,13 @@ modification time.`,
 					if e != nil {
 						return nil, e
 					}
-					return cipherlock.ReadStreamMetaWithPassword(bytes.NewReader(data), []byte(infoPassword))
+					return cipherlock.ReadStreamMetaWithPassword(bytes.NewReader(data), password)
 				}()
 				if err != nil {
 					return fmt.Errorf("reading metadata: %w", err)
 				}
-			} else if !errors.Is(err, cipherlock.ErrEncryptedMeta) {
-				return fmt.Errorf("reading metadata: %w", err)
 			} else {
-				fmt.Fprintln(cmd.OutOrStdout(), "Metadata: encrypted (use --password to view)")
-				return nil
+				return fmt.Errorf("reading metadata: %w", err)
 			}
 		}
 
@@ -108,9 +119,15 @@ modification time.`,
 	},
 }
 
-var infoPassword string
+var (
+	infoPasswordEnv   string
+	infoPasswordFD    string
+	infoPasswordStdin bool
+)
 
 func init() {
 	rootCmd.AddCommand(infoCmd)
-	infoCmd.Flags().StringVar(&infoPassword, "password", "", "password to decrypt encrypted metadata")
+	infoCmd.Flags().StringVar(&infoPasswordEnv, "password-env", "", "read password from environment variable")
+	infoCmd.Flags().StringVar(&infoPasswordFD, "password-fd", "", "read password from file descriptor number (e.g. 0 for stdin pipe)")
+	infoCmd.Flags().BoolVar(&infoPasswordStdin, "password-stdin", false, "read password from stdin")
 }

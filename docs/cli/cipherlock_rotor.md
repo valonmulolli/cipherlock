@@ -50,6 +50,7 @@ cipherlock rotor [flags] <file>
       --in-place         overwrite the source file instead of creating a new one
       --include string   only process files matching this glob pattern
       --keep             keep the original file (opposite of --in-place)
+      --no-color         disable ANSI color output
       --quiet            suppress progress output
       --recursive        process directories recursively
 ```

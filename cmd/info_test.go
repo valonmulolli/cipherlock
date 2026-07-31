@@ -37,9 +37,17 @@ func TestInfoEncryptedMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	origPassword := infoPassword
-	infoPassword = ""
-	defer func() { infoPassword = origPassword }()
+	origEnv := infoPasswordEnv
+	infoPasswordEnv = ""
+	origFD := infoPasswordFD
+	infoPasswordFD = ""
+	origStdin := infoPasswordStdin
+	infoPasswordStdin = false
+	defer func() {
+		infoPasswordEnv = origEnv
+		infoPasswordFD = origFD
+		infoPasswordStdin = origStdin
+	}()
 
 	var outBuf bytes.Buffer
 	infoCmd.SetOut(&outBuf)
@@ -85,9 +93,10 @@ func TestInfoWithPassword(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	origPassword := infoPassword
-	infoPassword = string(testPassword)
-	defer func() { infoPassword = origPassword }()
+	t.Setenv("CIPHERLOCK_TEST_PW", string(testPassword))
+	origEnv := infoPasswordEnv
+	infoPasswordEnv = "CIPHERLOCK_TEST_PW"
+	defer func() { infoPasswordEnv = origEnv }()
 
 	var outBuf bytes.Buffer
 	infoCmd.SetOut(&outBuf)

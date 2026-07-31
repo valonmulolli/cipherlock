@@ -2,7 +2,10 @@ package cipherlock
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
+	"encoding/binary"
 	"errors"
 	"io"
 	"testing"
@@ -312,4 +315,183 @@ func TestReadStreamMetaWithPasswordV2(t *testing.T) {
 	if got == nil || got.Name != meta.Name {
 		t.Fatalf("expected meta, got %+v", got)
 	}
+}
+
+func encryptV06WithExpiry(t *testing.T, plaintext, password []byte, expiresAt time.Time) []byte {
+	t.Helper()
+	cfg := fastConfig()
+	cfg.FileMeta = &FileMeta{
+		Name:      "gated.bin",
+		Size:      int64(len(plaintext)),
+		ModTime:   time.Now(),
+		ExpiresAt: expiresAt,
+	}
+	var enc bytes.Buffer
+	if err := EncryptStreamV2(&enc, bytes.NewReader(plaintext), password, cfg); err != nil {
+		t.Fatalf("EncryptStreamV2: %v", err)
+	}
+	return enc.Bytes()
+}
+
+func TestDecryptWithMetaNoExpiry(t *testing.T) {
+	// A FileMeta with a zero ExpiresAt must round-trip with a zero
+	// ExpiresAt, so DecryptWithMeta does not enforce any gate.
+	plaintext := []byte("no gate")
+	password := []byte("v06-nogate-pwd")
+	cfg := fastConfig()
+	cfg.FileMeta = &FileMeta{
+		Name:    "plain.txt",
+		Size:    int64(len(plaintext)),
+		ModTime: time.Now(),
+	}
+
+	var enc bytes.Buffer
+	if err := EncryptStreamV2(&enc, bytes.NewReader(plaintext), password, cfg); err != nil {
+		t.Fatalf("EncryptStreamV2: %v", err)
+	}
+
+	var dec bytes.Buffer
+	meta, err := DecryptWithMeta(&dec, bytes.NewReader(enc.Bytes()), password)
+	if err != nil {
+		t.Fatalf("DecryptWithMeta: %v", err)
+	}
+	if meta == nil {
+		t.Fatal("expected FileMeta")
+	}
+	if !meta.ExpiresAt.IsZero() {
+		t.Fatalf("expected zero ExpiresAt, got %s", meta.ExpiresAt)
+	}
+	if !bytes.Equal(dec.Bytes(), plaintext) {
+		t.Fatalf("plaintext mismatch: got %q, want %q", dec.Bytes(), plaintext)
+	}
+}
+
+func TestDecryptWithMetaEnforcesExpiry(t *testing.T) {
+	plaintext := []byte("gated content")
+	password := []byte("v06-gate-pwd")
+
+	// Future expiry: decrypt succeeds and returns the expiry.
+	future := time.Now().Add(24 * time.Hour)
+	enc := encryptV06WithExpiry(t, plaintext, password, future)
+	var dec bytes.Buffer
+	meta, err := DecryptWithMeta(&dec, bytes.NewReader(enc), password)
+	if err != nil {
+		t.Fatalf("DecryptWithMeta (future expiry): %v", err)
+	}
+	if meta == nil || !meta.ExpiresAt.Equal(future) {
+		t.Fatalf("expected ExpiresAt %s, got %+v", future, meta)
+	}
+
+	// Past expiry: decrypt must fail with ErrExpired even though the
+	// password is correct and the data authenticates. Because v0x06
+	// enforces the gate inside the decrypt loop before any chunk is
+	// written, no plaintext may reach the destination.
+	past := time.Now().Add(-time.Hour)
+	enc = encryptV06WithExpiry(t, plaintext, password, past)
+	dec.Reset()
+	if _, err := DecryptWithMeta(&dec, bytes.NewReader(enc), password); !errors.Is(err, ErrExpired) {
+		t.Fatalf("expected ErrExpired, got %v", err)
+	}
+	if dec.Len() != 0 {
+		t.Fatalf("expected no plaintext written on expired file, got %d bytes", dec.Len())
+	}
+}
+
+func TestDecryptStreamV2DoesNotEnforceExpiry(t *testing.T) {
+	// The low-level DecryptStreamV2 entry point only returns metadata and
+	// does not enforce the gate; that is the documented escape hatch for
+	// recovering the contents of expired files. Decrypt/DecryptWithMeta are
+	// the enforced entry points.
+	plaintext := []byte("recover me")
+	password := []byte("v06-recover-pwd")
+	enc := encryptV06WithExpiry(t, plaintext, password, time.Now().Add(-time.Hour))
+
+	var dec bytes.Buffer
+	meta, err := DecryptStreamV2(&dec, bytes.NewReader(enc), password)
+	if err != nil {
+		t.Fatalf("DecryptStreamV2 (escape hatch): %v", err)
+	}
+	if meta == nil {
+		t.Fatal("expected FileMeta")
+	}
+	if meta.ExpiresAt.IsZero() {
+		t.Fatal("expected the past expiry to be surfaced on metadata")
+	}
+	if time.Now().Before(meta.ExpiresAt) {
+		t.Fatalf("expected expiry in the past, got %s", meta.ExpiresAt)
+	}
+	if !bytes.Equal(dec.Bytes(), plaintext) {
+		t.Fatalf("plaintext mismatch: got %q, want %q", dec.Bytes(), plaintext)
+	}
+}
+
+func TestDecryptWithMetaOldZeroTimeArtifact(t *testing.T) {
+	// Backwards compatibility: versions before the serialization fix wrote
+	// time.Time{}.UnixNano() (a large negative value) for a zero ExpiresAt,
+	// which round-tripped to year 1754. decryptStreamV2Meta must treat any
+	// non-positive ExpiresAt value as "no gate" so those files keep
+	// decrypting with a zero ExpiresAt.
+
+	// Derive a real key from a v0x06 stream so the crafted chunk is
+	// authenticated with the same key material the reader expects.
+	plaintext := []byte("legacy file")
+	password := []byte("v06-legacy-pwd")
+	cfg := fastConfig()
+	cfg.FileMeta = &FileMeta{Name: "legacy.txt", Size: int64(len(plaintext)), ModTime: time.Now()}
+
+	var enc bytes.Buffer
+	if err := EncryptStreamV2(&enc, bytes.NewReader(plaintext), password, cfg); err != nil {
+		t.Fatalf("EncryptStreamV2: %v", err)
+	}
+
+	sh, key, err := readStreamV2Header(
+		io.MultiReader(bytes.NewReader(append(append([]byte{}, magic[:]...), formatVersionStreamV2)), bytes.NewReader(enc.Bytes()[5:])),
+		password,
+	)
+	if err != nil {
+		t.Fatalf("readStreamV2Header: %v", err)
+	}
+	defer clear(key)
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		t.Fatalf("aes.NewCipher: %v", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		t.Fatalf("cipher.NewGCM: %v", err)
+	}
+
+	// Build the meta plaintext the old writer produced: name, size,
+	// modtime, then time.Time{}.UnixNano() as ExpiresAt.
+	legacy := &FileMeta{Name: "legacy.txt", Size: int64(len(plaintext)), ModTime: time.Now()}
+	var raw []byte
+	raw = binary.LittleEndian.AppendUint16(raw, uint16(len(legacy.Name)))
+	raw = append(raw, legacy.Name...)
+	raw = binary.LittleEndian.AppendUint64(raw, uint64(legacy.Size))
+	raw = binary.LittleEndian.AppendUint64(raw, uint64(legacy.ModTime.UnixNano()))
+	raw = binary.LittleEndian.AppendUint64(raw, uint64(time.Time{}.UnixNano())) // legacy artifact
+
+	nonce := make([]byte, nonceSize)
+	if _, err := rand.Read(nonce); err != nil {
+		t.Fatalf("rand.Read: %v", err)
+	}
+	ct := gcm.Seal(nil, nonce, raw, nil)
+	var chunk bytes.Buffer
+	chunk.Write(nonce)
+	if err := binary.Write(&chunk, binary.LittleEndian, uint32(len(ct))); err != nil {
+		t.Fatalf("binary.Write: %v", err)
+	}
+	chunk.Write(ct)
+
+	got, err := decryptStreamV2Meta(&chunk, gcm)
+	if err != nil {
+		t.Fatalf("decryptStreamV2Meta: %v", err)
+	}
+	if got == nil || got.Name != "legacy.txt" {
+		t.Fatalf("unexpected meta: %+v", got)
+	}
+	if !got.ExpiresAt.IsZero() {
+		t.Fatalf("legacy artifact must decode as zero ExpiresAt, got %+v", got.ExpiresAt)
+	}
+	_ = sh // header captured for key derivation; keep the variable bound
 }

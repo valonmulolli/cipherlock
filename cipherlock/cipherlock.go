@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"golang.org/x/crypto/argon2"
@@ -103,10 +104,15 @@ func Decrypt(dst io.Writer, src io.Reader, password []byte) error {
 // exists so that downstream code can recover the original filename and
 // modification time without an extra ReadStreamMetaWithPassword call.
 //
+// It enforces time-gated expiry: if the file was created with a non-zero
+// FileMeta.ExpiresAt in the past, it returns ErrExpired after successfully
+// authenticating the data (so wrong-password errors still surface first).
+//
 // It returns ErrInvalidFormat if src does not start with the cipherlock magic,
 // ErrVersionMismatch for an unrecognized format version, ErrAuthFailed on
-// wrong password or tampered ciphertext, or ErrChecksumMismatch if the
-// embedded SHA-256 checksum does not match the decrypted plaintext.
+// wrong password or tampered ciphertext, ErrChecksumMismatch if the
+// embedded SHA-256 checksum does not match the decrypted plaintext, or
+// ErrExpired for a time-gated file past its expiration.
 func DecryptWithMeta(dst io.Writer, src io.Reader, password []byte) (*FileMeta, error) {
 	var hdrMagic [4]byte
 	if _, err := io.ReadFull(src, hdrMagic[:]); err != nil {
@@ -125,31 +131,44 @@ func DecryptWithMeta(dst io.Writer, src io.Reader, password []byte) (*FileMeta, 
 	// we always prepend the full 5-byte prefix back onto src.
 	prefix := append(hdrMagic[:], version)
 
+	var meta *FileMeta
+	var decryptErr error
 	switch version {
 	case formatVersionV2, formatVersionV3:
 		combined := io.MultiReader(bytes.NewReader(prefix), src)
-		return nil, decryptV2V3(dst, combined, password)
+		decryptErr = decryptV2V3(dst, combined, password)
 	case formatVersionMulti:
 		multiSrc := io.MultiReader(bytes.NewReader(prefix), src)
-		return nil, decryptMulti(dst, multiSrc, password)
+		decryptErr = decryptMulti(dst, multiSrc, password)
 	case formatVersionStream:
 		streamSrc := io.MultiReader(bytes.NewReader(prefix), src)
-		meta, streamErr := decryptStream(dst, streamSrc, password)
-		return meta, streamErr
+		meta, decryptErr = decryptStream(dst, streamSrc, password)
 	case formatVersionStreamV2:
 		streamSrc := io.MultiReader(bytes.NewReader(prefix), src)
-		meta, streamErr := decryptStreamV2(dst, streamSrc, password)
-		return meta, streamErr
+		meta, decryptErr = decryptStreamV2Impl(dst, streamSrc, password, true)
 	case formatVersionStreamMulti:
 		multiSrc := io.MultiReader(bytes.NewReader(prefix), src)
-		meta, streamErr := DecryptStreamMultiFromReader(dst, multiSrc, password)
-		return meta, streamErr
+		meta, decryptErr = DecryptStreamMultiFromReader(dst, multiSrc, password)
 	case formatVersionAsymmetric:
 		asymSrc := io.MultiReader(bytes.NewReader(prefix), src)
-		return DecryptAsymmetricWithMeta(dst, asymSrc, nil)
+		meta, decryptErr = DecryptAsymmetricWithMeta(dst, asymSrc, nil)
 	default:
 		return nil, ErrVersionMismatch
 	}
+	if decryptErr != nil {
+		return nil, decryptErr
+	}
+	// v0x06 enforces expiry inside decryptStreamV2Impl before writing any
+	// plaintext. v0x07 multi-recipient files share the same metadata chunk
+	// format and therefore also carry ExpiresAt; enforcement for them happens
+	// here (after the full decrypt). CLI decrypt paths always write to a temp
+	// file that is removed on error, so no expired plaintext survives. The
+	// exported DecryptStreamV2 and DecryptStreamMultiFromReader remain the
+	// documented escape hatches for recovering expired files.
+	if meta != nil && !meta.ExpiresAt.IsZero() && time.Now().After(meta.ExpiresAt) {
+		return nil, ErrExpired
+	}
+	return meta, nil
 }
 
 // decryptV2V3 handles v0x02 and v0x03 formats.

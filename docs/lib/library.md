@@ -628,8 +628,21 @@ case errors.Is(err, cipherlock.ErrUnsupportedIdentity):
     // identity type not recognized
 case errors.Is(err, cipherlock.ErrAtLeastOnePassword):
     // empty password list in multi-recipient mode
+case errors.Is(err, cipherlock.ErrExpired):
+    // file has a past expiration time (time-gated file)
 }
 ```
+
+`ErrExpired` is returned by the high-level decrypt entry points
+(`Decrypt`, `DecryptFile`, `DecryptFileWithMeta`, `DecryptWithMeta` and the
+`*Context` wrappers that route through them) when a time-gated file is
+decrypted after its expiration. The expiration time is authenticated
+metadata (AES-GCM), so it cannot be tampered with.
+
+If you need to recover the contents of an expired file you authored, use the
+low-level streaming entry points instead, which intentionally do not enforce
+expiration: `DecryptStreamV2` (v0x06) and `DecryptStreamMultiFromReader`
+(v0x07).
 
 ### Edge cases
 
@@ -641,6 +654,7 @@ case errors.Is(err, cipherlock.ErrAtLeastOnePassword):
 | Corrupted header | Returns `ErrCorrupted` during decrypt. |
 | Truncated ciphertext | Returns `ErrCorrupted` or `ErrAuthFailed`. |
 | Wrong password | Returns `ErrAuthFailed` (AES-GCM authentication fails). |
+| Time-gated file, past expiry | High-level decrypt entry points return `ErrExpired`. v0x06 files are rejected before any plaintext is written; v0x07 multi-recipient files return the error after decryption (CLI paths write to temp files that are removed on error). `DecryptStreamV2` / `DecryptStreamMultiFromReader` bypass the check for archival recovery. |
 
 ## Best practices
 

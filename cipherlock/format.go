@@ -41,6 +41,13 @@ var ErrUnsupportedIdentity = errors.New("cipherlock: unsupported identity type")
 // encrypted identity without providing a passphrase.
 var ErrIdentityNeedsPassphrase = errors.New("cipherlock: identity is encrypted, provide a passphrase")
 
+// ErrExpired is returned by the decrypt entry points when the file was
+// created with a time gate (FileMeta.ExpiresAt) and the current time is past
+// the expiration. The expiry is embedded in the authenticated metadata, so it
+// cannot be tampered with; enforcement lives in DecryptWithMeta so all CLI
+// commands and library callers share it.
+var ErrExpired = errors.New("cipherlock: file has expired")
+
 const (
 	formatVersionV2          byte = 0x02
 	formatVersionV3          byte = 0x03

@@ -6,11 +6,11 @@ Display encrypted file metadata
 
 Show metadata about an encrypted cipherlock file.
 
-Without --password, displays basic information (format version, whether
-the file is encrypted, and cleartext metadata if available).
+Without a password source, displays basic information (format version,
+whether the file is encrypted, and cleartext metadata if available).
 
-With --password, also displays the stored filename, original size, and
-modification time.
+With --password-env, --password-fd, or --password-stdin, also displays the
+stored filename, original size, and modification time.
 
 ```
 cipherlock tumbler [flags] <file>
@@ -19,8 +19,10 @@ cipherlock tumbler [flags] <file>
 ### Options
 
 ```
-  -h, --help              help for tumbler
-      --password string   password to decrypt encrypted metadata
+  -h, --help                  help for tumbler
+      --password-env string   read password from environment variable
+      --password-fd string    read password from file descriptor number (e.g. 0 for stdin pipe)
+      --password-stdin        read password from stdin
 ```
 
 ### Options inherited from parent commands
@@ -38,6 +40,7 @@ cipherlock tumbler [flags] <file>
       --in-place         overwrite the source file instead of creating a new one
       --include string   only process files matching this glob pattern
       --keep             keep the original file (opposite of --in-place)
+      --no-color         disable ANSI color output
       --quiet            suppress progress output
       --recursive        process directories recursively
 ```
