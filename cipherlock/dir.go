@@ -3,6 +3,7 @@ package cipherlock
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +16,10 @@ import (
 //
 // It returns errors from os.Create, tar/gzip writing, or Encrypt.
 func EncryptDir(source, dest string, password []byte, config *Config) error {
+	return encryptDirContext(context.Background(), source, dest, password, config)
+}
+
+func encryptDirContext(ctx context.Context, source, dest string, password []byte, config *Config) error {
 	source = strings.TrimRight(source, "/\\")
 
 	if dest == "" {
@@ -22,20 +27,44 @@ func EncryptDir(source, dest string, password []byte, config *Config) error {
 	}
 
 	pipeR, pipeW := io.Pipe()
-	defer pipeR.Close() //nolint:errcheck
-
+	tarDone := make(chan error, 1)
 	go func() {
 		err := tarGzDir(source, pipeW)
 		pipeW.CloseWithError(err)
+		tarDone <- err
 	}()
 
 	destFile, err := os.Create(dest)
 	if err != nil {
+		pipeR.Close() //nolint:errcheck
+		<-tarDone
 		return err
 	}
-	defer destFile.Close() //nolint:errcheck
 
-	return Encrypt(destFile, pipeR, password, config)
+	encryptDone := make(chan error, 1)
+	go func() {
+		encryptErr := Encrypt(destFile, withCancel(ctx, pipeR), password, config)
+		if closeErr := destFile.Close(); encryptErr == nil {
+			encryptErr = closeErr
+		}
+		encryptDone <- encryptErr
+	}()
+
+	select {
+	case err := <-encryptDone:
+		pipeR.Close() //nolint:errcheck
+		tarErr := <-tarDone
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return err
+		}
+		return tarErr
+	case <-ctx.Done():
+		pipeR.CloseWithError(ctx.Err()) //nolint:errcheck
+		return ctx.Err()
+	}
 }
 
 // DecryptDir decrypts a cipherlock file containing a tar.gz archive and extracts it.
@@ -44,26 +73,49 @@ func EncryptDir(source, dest string, password []byte, config *Config) error {
 // It returns errors from os.Open, Decrypt, or gzip/tar extraction, including
 // ErrInvalidFormat, ErrVersionMismatch, or ErrAuthFailed from the decrypt step.
 func DecryptDir(source, dest string, password []byte) error {
+	return decryptDirContext(context.Background(), source, dest, password)
+}
+
+func decryptDirContext(ctx context.Context, source, dest string, password []byte) error {
 	if dest == "" {
 		dest = strings.TrimSuffix(source, ".cipherlock")
 		dest = strings.TrimSuffix(dest, ".encrypted")
 	}
 
 	pipeR, pipeW := io.Pipe()
-	defer pipeR.Close() //nolint:errcheck
-
 	srcFile, err := os.Open(source)
 	if err != nil {
 		return err
 	}
 	defer srcFile.Close() //nolint:errcheck
 
+	decryptDone := make(chan error, 1)
 	go func() {
-		err := Decrypt(pipeW, srcFile, password)
+		err := Decrypt(pipeW, withCancel(ctx, srcFile), password)
 		pipeW.CloseWithError(err)
+		decryptDone <- err
 	}()
 
-	return untarGzDir(dest, pipeR)
+	watchDone := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			pipeR.CloseWithError(ctx.Err()) //nolint:errcheck
+		case <-watchDone:
+		}
+	}()
+
+	untarErr := untarGzDir(dest, pipeR)
+	close(watchDone)
+	pipeR.Close() //nolint:errcheck
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	decryptErr := <-decryptDone
+	if untarErr != nil {
+		return untarErr
+	}
+	return decryptErr
 }
 
 func tarGzDir(source string, w io.Writer) error {
@@ -75,7 +127,15 @@ func tarGzDir(source string, w io.Writer) error {
 			return err
 		}
 
-		header, err := tar.FileInfoHeader(info, "")
+		linkname := ""
+		if info.Mode()&os.ModeSymlink != 0 {
+			linkname, err = os.Readlink(path)
+			if err != nil {
+				return err
+			}
+		}
+
+		header, err := tar.FileInfoHeader(info, linkname)
 		if err != nil {
 			return err
 		}
@@ -93,7 +153,7 @@ func tarGzDir(source string, w io.Writer) error {
 			return err
 		}
 
-		if info.IsDir() {
+		if info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			return nil
 		}
 

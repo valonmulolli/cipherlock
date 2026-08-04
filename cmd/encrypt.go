@@ -405,8 +405,12 @@ func encryptToWriter(w io.Writer, r io.Reader, passwords [][]byte, asymmetricRec
 			return encryptFn(w, r, asymmetricRecipients, config)
 		}
 		aw := cipherlock.NewArmorWriter(w)
-		defer aw.Close() //nolint:errcheck
-		return encryptFn(aw, r, asymmetricRecipients, config)
+		err := encryptFn(aw, r, asymmetricRecipients, config)
+		closeErr := aw.Close()
+		if err != nil {
+			return err
+		}
+		return closeErr
 	}
 
 	var encryptFn func(io.Writer, io.Reader, [][]byte, *cipherlock.Config) error
@@ -426,8 +430,12 @@ func encryptToWriter(w io.Writer, r io.Reader, passwords [][]byte, asymmetricRec
 		return encryptFn(w, r, passwords, config)
 	}
 	aw := cipherlock.NewArmorWriter(w)
-	defer aw.Close() //nolint:errcheck
-	return encryptFn(aw, r, passwords, config)
+	err := encryptFn(aw, r, passwords, config)
+	closeErr := aw.Close()
+	if err != nil {
+		return err
+	}
+	return closeErr
 }
 
 func init() {

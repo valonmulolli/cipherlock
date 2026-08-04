@@ -178,21 +178,13 @@ func readMultiHeader(r io.Reader) (multiHeader, error) {
 // for streaming, or EncryptStreamV2 (v0x06) for single-recipient. The v0x04
 // format is still readable and remains for backward compatibility.
 func EncryptMulti(dst io.Writer, src io.Reader, passwords [][]byte, config *Config) error {
-	if config == nil {
-		config = DefaultConfig
-	}
 	if len(passwords) == 0 {
 		return ErrAtLeastOnePassword
 	}
 
-	cfg := *config
-	config = &cfg
-
-	if cfg.SaltLen <= 0 {
-		cfg.SaltLen = DefaultConfig.SaltLen
-	}
-	if cfg.KeyLen <= 0 {
-		cfg.KeyLen = DefaultConfig.KeyLen
+	cfg, err := normalizedConfig(config)
+	if err != nil {
+		return err
 	}
 
 	plaintext, err := io.ReadAll(src)
@@ -224,7 +216,7 @@ func EncryptMulti(dst io.Writer, src io.Reader, passwords [][]byte, config *Conf
 
 	var flags byte
 	var checksum []byte
-	if config.Checksum {
+	if cfg.Checksum {
 		h := sha256.Sum256(plaintext)
 		checksum = h[:]
 		flags |= flagChecksum
@@ -232,12 +224,12 @@ func EncryptMulti(dst io.Writer, src io.Reader, passwords [][]byte, config *Conf
 
 	entries := make([]recipientEntry, len(passwords))
 	for i, pwd := range passwords {
-		salt := make([]byte, config.SaltLen)
+		salt := make([]byte, cfg.SaltLen)
 		if _, err := io.ReadFull(rand.Reader, salt); err != nil {
 			return err
 		}
 
-		key := argon2.IDKey(pwd, salt, config.Time, config.Memory, config.Threads, config.KeyLen)
+		key := argon2.IDKey(pwd, salt, cfg.Time, cfg.Memory, cfg.Threads, cfg.KeyLen)
 		block, err := aes.NewCipher(key)
 		if err != nil {
 			clear(key)
@@ -259,10 +251,10 @@ func EncryptMulti(dst io.Writer, src io.Reader, passwords [][]byte, config *Conf
 
 		entries[i] = recipientEntry{
 			Salt:      salt,
-			Time:      config.Time,
-			Memory:    config.Memory,
-			Threads:   config.Threads,
-			KeyLen:    config.KeyLen,
+			Time:      cfg.Time,
+			Memory:    cfg.Memory,
+			Threads:   cfg.Threads,
+			KeyLen:    cfg.KeyLen,
 			KeyNonce:  [nonceSize]byte(keyNonce),
 			SealedKey: sealedKey,
 		}

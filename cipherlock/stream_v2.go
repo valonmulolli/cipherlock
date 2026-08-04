@@ -357,10 +357,15 @@ func decryptStreamV2Impl(dst io.Writer, src io.Reader, password []byte, enforceE
 		hasher = sha256.New()
 	}
 
-	var decompress func()
+	var decompress func() error
 	if sh.Flags&flagCompressed != 0 {
 		dst, decompress = decompressWriter(dst)
 	}
+	defer func() {
+		if decompress != nil {
+			_ = decompress()
+		}
+	}()
 
 	for {
 		var nonce [nonceSize]byte
@@ -409,7 +414,11 @@ func decryptStreamV2Impl(dst io.Writer, src io.Reader, password []byte, enforceE
 	}
 
 	if decompress != nil {
-		decompress()
+		finish := decompress
+		decompress = nil
+		if err := finish(); err != nil {
+			return nil, err
+		}
 	}
 
 	return meta, nil
@@ -422,50 +431,32 @@ func decryptStreamV2Impl(dst io.Writer, src io.Reader, password []byte, enforceE
 //
 // It returns a ChunkSize bound error when config.ChunkSize exceeds maxChunkSize.
 func EncryptStreamV2(dst io.Writer, src io.Reader, password []byte, config *Config) error {
-	if config == nil {
-		config = DefaultConfig
+	cfg, err := normalizedConfig(config)
+	if err != nil {
+		return err
 	}
-
-	// Take a local copy so we never mutate the caller's config (or the shared
-	// DefaultConfig) under concurrent use.
-	cfg := *config
-	config = &cfg
-
 	chunkSize := cfg.ChunkSize
-	if chunkSize <= 0 {
-		chunkSize = DefaultChunkSize
-	}
-	if chunkSize > maxChunkSize {
-		return fmt.Errorf("cipherlock: ChunkSize %d exceeds maxChunkSize %d", chunkSize, maxChunkSize)
-	}
-	cfg.ChunkSize = chunkSize
-	if cfg.SaltLen <= 0 {
-		cfg.SaltLen = DefaultConfig.SaltLen
-	}
-	if cfg.KeyLen <= 0 {
-		cfg.KeyLen = DefaultConfig.KeyLen
-	}
 
 	var hasher hash.Hash
-	if config.Checksum {
+	if cfg.Checksum {
 		hasher = sha256.New()
 	}
 
-	if config.Compression {
+	if cfg.Compression {
 		src = compressReader(src)
 	}
 
-	key, err := writeStreamV2Header(dst, password, config)
+	key, err := writeStreamV2Header(dst, password, cfg)
 	if err != nil {
 		return err
 	}
 	defer clear(key)
 
-	if err := encryptStreamV2(dst, src, key, chunkSize, config.FileMeta, hasher); err != nil {
+	if err := encryptStreamV2(dst, src, key, chunkSize, cfg.FileMeta, hasher); err != nil {
 		return err
 	}
 
-	if config.Checksum && hasher != nil {
+	if cfg.Checksum && hasher != nil {
 		checksum := hasher.Sum(nil)
 		if _, err := dst.Write(checksum); err != nil {
 			return err

@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"time"
 
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/curve25519"
@@ -293,18 +294,11 @@ func EncryptAsymmetric(dst io.Writer, src io.Reader, recipients []*X25519Recipie
 		return errors.New("cipherlock: at least one recipient required")
 	}
 
-	if config == nil {
-		config = DefaultConfig
+	cfg, err := normalizedConfig(config)
+	if err != nil {
+		return err
 	}
-	cfg := *config
-
 	chunkSize := cfg.ChunkSize
-	if chunkSize <= 0 {
-		chunkSize = DefaultChunkSize
-	}
-	if chunkSize > maxChunkSize {
-		return fmt.Errorf("cipherlock: ChunkSize %d exceeds maxChunkSize %d", chunkSize, maxChunkSize)
-	}
 
 	fileKey := make([]byte, 32)
 	if _, err := io.ReadFull(rand.Reader, fileKey); err != nil {
@@ -510,12 +504,20 @@ func decryptAsymmetricBody(dst io.Writer, src io.Reader, fileKey []byte, flags b
 		if err != nil {
 			return nil, err
 		}
+		if meta != nil && !meta.ExpiresAt.IsZero() && time.Now().After(meta.ExpiresAt) {
+			return nil, ErrExpired
+		}
 	}
 
-	var decompress func()
+	var decompress func() error
 	if flags&flagCompressed != 0 {
 		dst, decompress = decompressWriter(dst)
 	}
+	defer func() {
+		if decompress != nil {
+			_ = decompress()
+		}
+	}()
 
 	for {
 		var nonce [nonceSize]byte
@@ -566,7 +568,11 @@ func decryptAsymmetricBody(dst io.Writer, src io.Reader, fileKey []byte, flags b
 	}
 
 	if decompress != nil {
-		decompress()
+		finish := decompress
+		decompress = nil
+		if err := finish(); err != nil {
+			return nil, err
+		}
 	}
 
 	return meta, nil

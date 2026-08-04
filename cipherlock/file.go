@@ -2,6 +2,7 @@ package cipherlock
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -28,6 +29,9 @@ func EncryptFile(source, dest string, password []byte, config *Config) error {
 		return err
 	}
 	defer srcFile.Close() //nolint:errcheck
+	if err := rejectSameFile(srcFile, dest); err != nil {
+		return err
+	}
 
 	destFile, err := os.Create(dest)
 	if err != nil {
@@ -56,14 +60,35 @@ func DecryptFile(source, dest string, password []byte) error {
 		return err
 	}
 	defer srcFile.Close() //nolint:errcheck
+	if err := rejectSameFile(srcFile, dest); err != nil {
+		return err
+	}
 
-	destFile, err := os.Create(dest)
+	destFile, err := os.CreateTemp(filepath.Dir(dest), ".cipherlock-decrypt-")
 	if err != nil {
 		return err
 	}
-	defer destFile.Close() //nolint:errcheck
+	tempPath := destFile.Name()
+	cleanup := func() {
+		destFile.Close()    //nolint:errcheck
+		os.Remove(tempPath) //nolint:errcheck
+	}
 
-	return Decrypt(destFile, srcFile, password)
+	decryptErr := Decrypt(destFile, srcFile, password)
+	closeErr := destFile.Close()
+	if decryptErr != nil {
+		os.Remove(tempPath) //nolint:errcheck
+		return decryptErr
+	}
+	if closeErr != nil {
+		os.Remove(tempPath) //nolint:errcheck
+		return closeErr
+	}
+	if err := replaceFile(tempPath, dest); err != nil {
+		cleanup()
+		return err
+	}
+	return nil
 }
 
 // DecryptFileWithMeta is the metadata-aware form of DecryptFile. The
@@ -82,14 +107,35 @@ func DecryptFileWithMeta(source, dest string, password []byte) (*FileMeta, error
 		return nil, err
 	}
 	defer srcFile.Close() //nolint:errcheck
+	if err := rejectSameFile(srcFile, dest); err != nil {
+		return nil, err
+	}
 
-	destFile, err := os.Create(dest)
+	destFile, err := os.CreateTemp(filepath.Dir(dest), ".cipherlock-decrypt-")
 	if err != nil {
 		return nil, err
 	}
-	defer destFile.Close() //nolint:errcheck
+	tempPath := destFile.Name()
+	cleanup := func() {
+		destFile.Close()    //nolint:errcheck
+		os.Remove(tempPath) //nolint:errcheck
+	}
 
-	return DecryptWithMeta(destFile, srcFile, password)
+	meta, decryptErr := DecryptWithMeta(destFile, srcFile, password)
+	closeErr := destFile.Close()
+	if decryptErr != nil {
+		os.Remove(tempPath) //nolint:errcheck
+		return nil, decryptErr
+	}
+	if closeErr != nil {
+		os.Remove(tempPath) //nolint:errcheck
+		return nil, closeErr
+	}
+	if err := replaceFile(tempPath, dest); err != nil {
+		cleanup()
+		return nil, err
+	}
+	return meta, nil
 }
 
 // IsEncrypted reports whether the file at path is a cipherlock file.
@@ -163,4 +209,36 @@ func defaultDecryptPath(source string) string {
 		return strings.TrimSuffix(source, ext)
 	}
 	return source + ".decrypted"
+}
+
+func rejectSameFile(src *os.File, dest string) error {
+	destInfo, err := os.Stat(dest)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	srcInfo, err := src.Stat()
+	if err != nil {
+		return err
+	}
+	if os.SameFile(srcInfo, destInfo) {
+		return fmt.Errorf("cipherlock: source and destination refer to the same file")
+	}
+	return nil
+}
+
+func replaceFile(source, dest string) error {
+	if err := os.Rename(source, dest); err == nil {
+		return nil
+	} else if !os.IsExist(err) {
+		return err
+	}
+
+	if err := os.Remove(dest); err != nil {
+		return err
+	}
+	return os.Rename(source, dest)
 }

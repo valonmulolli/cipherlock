@@ -551,40 +551,54 @@ func decryptAsymmetricFile(dstPath string, srcPath string, info os.FileInfo, ide
 }
 
 func restoreMeta(encPath, decPath string, password []byte, userSetOutput bool) {
-	encFile, err := os.Open(encPath)
+	readMeta := func(withPassword bool) (*cipherlock.FileMeta, error) {
+		encFile, err := os.Open(encPath)
+		if err != nil {
+			return nil, err
+		}
+		defer encFile.Close() //nolint:errcheck
+
+		isArmored, reader, err := cipherlock.IsArmoredReader(encFile)
+		if err != nil {
+			return nil, err
+		}
+		if isArmored {
+			reader, err = cipherlock.NewUnarmorReader(reader)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if withPassword {
+			return cipherlock.ReadStreamMetaWithPassword(reader, password)
+		}
+		return cipherlock.ReadStreamMeta(reader)
+	}
+
+	meta, err := readMeta(false)
+	if err != nil && errors.Is(err, cipherlock.ErrEncryptedMeta) && len(password) > 0 {
+		meta, err = readMeta(true)
+	}
 	if err != nil {
 		return
-	}
-	defer encFile.Close() //nolint:errcheck
-
-	meta, err := cipherlock.ReadStreamMeta(encFile)
-	if err != nil {
-		if errors.Is(err, cipherlock.ErrEncryptedMeta) && len(password) > 0 {
-			if _, err := encFile.Seek(0, 0); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: failed to seek encrypted file for metadata: %v\n", err)
-				return
-			}
-			meta, err = cipherlock.ReadStreamMetaWithPassword(encFile, password)
-			if err != nil {
-				return
-			}
-		} else {
-			return
-		}
 	}
 	if meta == nil {
 		return
 	}
 
 	if !userSetOutput && meta.Name != "" {
-		dir := filepath.Dir(decPath)
-		restoredName := filepath.Join(dir, meta.Name)
-		if restoredName != decPath {
-			if err := os.Rename(decPath, restoredName); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: failed to restore original filename: %v\n", err)
-				return
+		if filepath.IsAbs(meta.Name) || meta.Name == "." || meta.Name == ".." ||
+			strings.ContainsAny(meta.Name, `/\\`) || strings.ContainsRune(meta.Name, 0) {
+			fmt.Fprintf(os.Stderr, "warning: refusing unsafe original filename %q\n", meta.Name)
+		} else {
+			dir := filepath.Dir(decPath)
+			restoredName := filepath.Join(dir, meta.Name)
+			if restoredName != decPath {
+				if err := os.Rename(decPath, restoredName); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: failed to restore original filename: %v\n", err)
+					return
+				}
+				decPath = restoredName
 			}
-			decPath = restoredName
 		}
 	}
 

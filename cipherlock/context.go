@@ -268,17 +268,7 @@ func ReKeyContext(ctx context.Context, dst io.Writer, src io.Reader, oldPassword
 // derivation. The spawned goroutine runs the KDF to completion even after
 // ctx is cancelled.
 func EncryptDirContext(ctx context.Context, source, dest string, password []byte, config *Config) error {
-	done := make(chan error, 1)
-	go func() {
-		done <- EncryptDir(source, dest, password, config)
-	}()
-	select {
-	case <-ctx.Done():
-		<-done
-		return ctx.Err()
-	case err := <-done:
-		return err
-	}
+	return encryptDirContext(ctx, source, dest, password, config)
 }
 
 // DecryptDirContext is a context-aware wrapper around DecryptDir.
@@ -288,15 +278,5 @@ func EncryptDirContext(ctx context.Context, source, dest string, password []byte
 // derivation. The spawned goroutine runs the KDF to completion even after
 // ctx is cancelled.
 func DecryptDirContext(ctx context.Context, source, dest string, password []byte) error {
-	done := make(chan error, 1)
-	go func() {
-		done <- DecryptDir(source, dest, password)
-	}()
-	select {
-	case <-ctx.Done():
-		<-done
-		return ctx.Err()
-	case err := <-done:
-		return err
-	}
+	return decryptDirContext(ctx, source, dest, password)
 }

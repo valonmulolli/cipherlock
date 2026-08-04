@@ -7,9 +7,9 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
-	"fmt"
 	"hash"
 	"io"
+	"time"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -238,32 +238,15 @@ func encryptStreamMultiBody(dst io.Writer, src io.Reader, fileKey []byte, chunkS
 // Unlike the legacy v0x04 EncryptMulti this routine streams the plaintext and never
 // loads the entire input into memory, so it is safe for arbitrarily large files.
 func EncryptStreamMulti(dst io.Writer, src io.Reader, passwords [][]byte, config *Config) error {
-	if config == nil {
-		config = DefaultConfig
-	}
 	if len(passwords) == 0 {
 		return ErrAtLeastOnePassword
 	}
 
-	// Take a local copy so we never mutate the caller's config (or the shared
-	// DefaultConfig) under concurrent use.
-	cfg := *config
-	config = &cfg
-
+	cfg, err := normalizedConfig(config)
+	if err != nil {
+		return err
+	}
 	chunkSize := cfg.ChunkSize
-	if chunkSize <= 0 {
-		chunkSize = DefaultChunkSize
-	}
-	if chunkSize > maxChunkSize {
-		return fmt.Errorf("cipherlock: ChunkSize %d exceeds maxChunkSize %d", chunkSize, maxChunkSize)
-	}
-	cfg.ChunkSize = chunkSize
-	if cfg.SaltLen <= 0 {
-		cfg.SaltLen = DefaultConfig.SaltLen
-	}
-	if cfg.KeyLen <= 0 {
-		cfg.KeyLen = DefaultConfig.KeyLen
-	}
 
 	fileKey := make([]byte, 32)
 	if _, err := io.ReadFull(rand.Reader, fileKey); err != nil {
@@ -273,12 +256,12 @@ func EncryptStreamMulti(dst io.Writer, src io.Reader, passwords [][]byte, config
 
 	entries := make([]recipientEntry, len(passwords))
 	for i, pwd := range passwords {
-		salt := make([]byte, config.SaltLen)
+		salt := make([]byte, cfg.SaltLen)
 		if _, err := io.ReadFull(rand.Reader, salt); err != nil {
 			return err
 		}
 
-		key := argon2.IDKey(pwd, salt, config.Time, config.Memory, config.Threads, config.KeyLen)
+		key := argon2.IDKey(pwd, salt, cfg.Time, cfg.Memory, cfg.Threads, cfg.KeyLen)
 		block, err := aes.NewCipher(key)
 		if err != nil {
 			clear(key)
@@ -299,23 +282,23 @@ func EncryptStreamMulti(dst io.Writer, src io.Reader, passwords [][]byte, config
 		sealed := gcm.Seal(nil, keyNonce, fileKey, nil)
 		entries[i] = recipientEntry{
 			Salt:      salt,
-			Time:      config.Time,
-			Memory:    config.Memory,
-			Threads:   config.Threads,
-			KeyLen:    config.KeyLen,
+			Time:      cfg.Time,
+			Memory:    cfg.Memory,
+			Threads:   cfg.Threads,
+			KeyLen:    cfg.KeyLen,
 			KeyNonce:  [nonceSize]byte(keyNonce),
 			SealedKey: sealed,
 		}
 	}
 
 	var flags byte
-	if config.Checksum {
+	if cfg.Checksum {
 		flags |= flagChecksum
 	}
-	if config.FileMeta != nil {
+	if cfg.FileMeta != nil {
 		flags |= flagHasMetadata
 	}
-	if config.Compression {
+	if cfg.Compression {
 		flags |= flagCompressed
 		src = compressReader(src)
 	}
@@ -325,15 +308,15 @@ func EncryptStreamMulti(dst io.Writer, src io.Reader, passwords [][]byte, config
 	}
 
 	var hasher hash.Hash
-	if config.Checksum {
+	if cfg.Checksum {
 		hasher = sha256.New()
 	}
 
-	if err := encryptStreamMultiBody(dst, src, fileKey, chunkSize, config.FileMeta, hasher); err != nil {
+	if err := encryptStreamMultiBody(dst, src, fileKey, chunkSize, cfg.FileMeta, hasher); err != nil {
 		return err
 	}
 
-	if config.Checksum && hasher != nil {
+	if cfg.Checksum && hasher != nil {
 		checksum := hasher.Sum(nil)
 		if _, err := dst.Write(checksum); err != nil {
 			return err
@@ -345,7 +328,7 @@ func EncryptStreamMulti(dst io.Writer, src io.Reader, passwords [][]byte, config
 // decryptStreamMultiBody reads the chunked body using fileKey. The optional leading
 // metadata chunk is decrypted when the flag is set; data chunks are decrypted and
 // written to dst; the optional checksum trailer is verified when set.
-func decryptStreamMultiBody(dst io.Writer, src io.Reader, fileKey []byte, flags byte, hasher hash.Hash) (*FileMeta, error) {
+func decryptStreamMultiBody(dst io.Writer, src io.Reader, fileKey []byte, flags byte, hasher hash.Hash, enforceExpiry bool) (*FileMeta, error) {
 	block, err := aes.NewCipher(fileKey)
 	if err != nil {
 		return nil, err
@@ -361,12 +344,20 @@ func decryptStreamMultiBody(dst io.Writer, src io.Reader, fileKey []byte, flags 
 		if err != nil {
 			return nil, err
 		}
+		if enforceExpiry && meta != nil && !meta.ExpiresAt.IsZero() && time.Now().After(meta.ExpiresAt) {
+			return nil, ErrExpired
+		}
 	}
 
-	var decompress func()
+	var decompress func() error
 	if flags&flagCompressed != 0 {
 		dst, decompress = decompressWriter(dst)
 	}
+	defer func() {
+		if decompress != nil {
+			_ = decompress()
+		}
+	}()
 
 	for {
 		var nonce [nonceSize]byte
@@ -415,7 +406,11 @@ func decryptStreamMultiBody(dst io.Writer, src io.Reader, fileKey []byte, flags 
 	}
 
 	if decompress != nil {
-		decompress()
+		finish := decompress
+		decompress = nil
+		if err := finish(); err != nil {
+			return nil, err
+		}
 	}
 
 	return meta, nil
@@ -444,7 +439,7 @@ func DecryptStreamMulti(dst io.Writer, src io.Reader, password []byte) (*FileMet
 		hasher = sha256.New()
 	}
 
-	return decryptStreamMultiBody(dst, src, fileKey, h.Flags, hasher)
+	return decryptStreamMultiBody(dst, src, fileKey, h.Flags, hasher, false)
 }
 
 // DecryptStreamMultiFromReader is a convenience wrapper for DecryptStreamMulti that
@@ -453,6 +448,10 @@ func DecryptStreamMulti(dst io.Writer, src io.Reader, password []byte) (*FileMet
 // It returns ErrInvalidFormat if src does not start with the cipherlock magic,
 // or ErrVersionMismatch for an unrecognized version.
 func DecryptStreamMultiFromReader(dst io.Writer, src io.Reader, password []byte) (*FileMeta, error) {
+	return decryptStreamMultiFromReader(dst, src, password, false)
+}
+
+func decryptStreamMultiFromReader(dst io.Writer, src io.Reader, password []byte, enforceExpiry bool) (*FileMeta, error) {
 	var hdrMagic [4]byte
 	if _, err := io.ReadFull(src, hdrMagic[:]); err != nil {
 		return nil, ErrInvalidFormat
@@ -469,7 +468,23 @@ func DecryptStreamMultiFromReader(dst io.Writer, src io.Reader, password []byte)
 		return nil, ErrVersionMismatch
 	}
 
-	return DecryptStreamMulti(dst, src, password)
+	h, err := readStreamMultiHeader(src)
+	if err != nil {
+		return nil, err
+	}
+
+	fileKey, err := unsealFileKey(h.Recipients, password)
+	if err != nil {
+		return nil, err
+	}
+	defer clear(fileKey)
+
+	var hasher hash.Hash
+	if h.Flags&flagChecksum != 0 {
+		hasher = sha256.New()
+	}
+
+	return decryptStreamMultiBody(dst, src, fileKey, h.Flags, hasher, enforceExpiry)
 }
 
 // readStreamMultiMeta peeks at the v0x07 header to recover the file key, then reads

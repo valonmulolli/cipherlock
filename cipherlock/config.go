@@ -102,6 +102,45 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// normalizedConfig returns a validated copy of config. Zero-valued optional
+// fields retain the historical behavior of using the corresponding default.
+// The returned copy is safe for callers to mutate without changing config or
+// the shared DefaultConfig.
+func normalizedConfig(config *Config) (*Config, error) {
+	defaults := *DefaultConfig
+	cfg := defaults
+	if config != nil {
+		cfg = *config
+	}
+
+	if cfg.SaltLen <= 0 {
+		cfg.SaltLen = defaults.SaltLen
+	}
+	if cfg.Time == 0 {
+		cfg.Time = defaults.Time
+	}
+	if cfg.Memory == 0 {
+		cfg.Memory = defaults.Memory
+	}
+	if cfg.Threads == 0 {
+		cfg.Threads = defaults.Threads
+	}
+	if cfg.KeyLen == 0 {
+		cfg.KeyLen = defaults.KeyLen
+	}
+	if cfg.ChunkSize <= 0 {
+		cfg.ChunkSize = defaults.ChunkSize
+	}
+	if cfg.ChunkSize > maxChunkSize {
+		return nil, fmt.Errorf("cipherlock: ChunkSize %d exceeds maxChunkSize %d", cfg.ChunkSize, maxChunkSize)
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
 // ProfilesPath returns the path to the user's profiles.json file.
 // The directory is created if it does not exist.
 func ProfilesPath() (string, error) {

@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
-	"fmt"
 	"hash"
 	"io"
 	"time"
@@ -232,40 +231,22 @@ func encryptStream(dst io.Writer, src io.Reader, key []byte, chunkSize int, hash
 //
 // It returns a ChunkSize bound error when config.ChunkSize exceeds maxChunkSize.
 func EncryptStream(dst io.Writer, src io.Reader, password []byte, config *Config) error {
-	if config == nil {
-		config = DefaultConfig
+	cfg, err := normalizedConfig(config)
+	if err != nil {
+		return err
 	}
 
-	if config.FileMeta != nil || config.Compression {
-		return EncryptStreamV2(dst, src, password, config)
+	if cfg.FileMeta != nil || cfg.Compression {
+		return EncryptStreamV2(dst, src, password, cfg)
 	}
-
-	// Take a local copy so we never mutate the caller's config (or the shared
-	// DefaultConfig) under concurrent use.
-	cfg := *config
-	config = &cfg
-
 	chunkSize := cfg.ChunkSize
-	if chunkSize <= 0 {
-		chunkSize = DefaultChunkSize
-	}
-	if chunkSize > maxChunkSize {
-		return fmt.Errorf("cipherlock: ChunkSize %d exceeds maxChunkSize %d", chunkSize, maxChunkSize)
-	}
-	cfg.ChunkSize = chunkSize
-	if cfg.SaltLen <= 0 {
-		cfg.SaltLen = DefaultConfig.SaltLen
-	}
-	if cfg.KeyLen <= 0 {
-		cfg.KeyLen = DefaultConfig.KeyLen
-	}
 
 	var hasher hash.Hash
-	if config.Checksum {
+	if cfg.Checksum {
 		hasher = sha256.New()
 	}
 
-	key, err := writeStreamHeader(dst, password, config)
+	key, err := writeStreamHeader(dst, password, cfg)
 	if err != nil {
 		return err
 	}
@@ -275,7 +256,7 @@ func EncryptStream(dst io.Writer, src io.Reader, password []byte, config *Config
 		return err
 	}
 
-	if config.Checksum && hasher != nil {
+	if cfg.Checksum && hasher != nil {
 		checksum := hasher.Sum(nil)
 		if _, err := dst.Write(checksum); err != nil {
 			return err

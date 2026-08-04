@@ -59,21 +59,36 @@ func compressReader(src io.Reader) io.Reader {
 	return pr
 }
 
-func decompressWriter(dst io.Writer) (io.Writer, func()) {
+func decompressWriter(dst io.Writer) (io.Writer, func() error) {
 	pr, pw := io.Pipe()
-	zr, _ := zstd.NewReader(pr, zstd.WithDecoderConcurrency(1))
+	zr, initErr := zstd.NewReader(pr, zstd.WithDecoderConcurrency(1))
 	var wg sync.WaitGroup
+	var copyErr error
+	var finishOnce sync.Once
+	var finishErr error
 	wg.Add(1)
 	go func() {
+		defer wg.Done()
+		if initErr != nil {
+			copyErr = initErr
+			_ = pr.CloseWithError(initErr)
+			return
+		}
 		buf := copyBufPool.Get().(*[]byte)
-		io.CopyBuffer(dst, zr, *buf)
+		_, copyErr = io.CopyBuffer(dst, zr, *buf)
 		copyBufPool.Put(buf)
 		zr.Close()
-		wg.Done()
+		// Closing the reader with the decoder error unblocks a writer that is
+		// currently sending data into the pipe after decompression stopped.
+		_ = pr.CloseWithError(copyErr)
 	}()
-	return pw, func() {
-		pw.Close()
-		wg.Wait()
+	return pw, func() error {
+		finishOnce.Do(func() {
+			_ = pw.Close()
+			wg.Wait()
+			finishErr = copyErr
+		})
+		return finishErr
 	}
 }
 
@@ -105,8 +120,9 @@ func Decrypt(dst io.Writer, src io.Reader, password []byte) error {
 // modification time without an extra ReadStreamMetaWithPassword call.
 //
 // It enforces time-gated expiry: if the file was created with a non-zero
-// FileMeta.ExpiresAt in the past, it returns ErrExpired after successfully
-// authenticating the data (so wrong-password errors still surface first).
+// FileMeta.ExpiresAt in the past, it returns ErrExpired after authenticating
+// the metadata and before writing any plaintext (so wrong-password errors
+// still surface first).
 //
 // It returns ErrInvalidFormat if src does not start with the cipherlock magic,
 // ErrVersionMismatch for an unrecognized format version, ErrAuthFailed on
@@ -148,7 +164,7 @@ func DecryptWithMeta(dst io.Writer, src io.Reader, password []byte) (*FileMeta, 
 		meta, decryptErr = decryptStreamV2Impl(dst, streamSrc, password, true)
 	case formatVersionStreamMulti:
 		multiSrc := io.MultiReader(bytes.NewReader(prefix), src)
-		meta, decryptErr = DecryptStreamMultiFromReader(dst, multiSrc, password)
+		meta, decryptErr = decryptStreamMultiFromReader(dst, multiSrc, password, true)
 	case formatVersionAsymmetric:
 		asymSrc := io.MultiReader(bytes.NewReader(prefix), src)
 		meta, decryptErr = DecryptAsymmetricWithMeta(dst, asymSrc, nil)
@@ -158,13 +174,9 @@ func DecryptWithMeta(dst io.Writer, src io.Reader, password []byte) (*FileMeta, 
 	if decryptErr != nil {
 		return nil, decryptErr
 	}
-	// v0x06 enforces expiry inside decryptStreamV2Impl before writing any
-	// plaintext. v0x07 multi-recipient files share the same metadata chunk
-	// format and therefore also carry ExpiresAt; enforcement for them happens
-	// here (after the full decrypt). CLI decrypt paths always write to a temp
-	// file that is removed on error, so no expired plaintext survives. The
-	// exported DecryptStreamV2 and DecryptStreamMultiFromReader remain the
-	// documented escape hatches for recovering expired files.
+	// v0x06 and v0x07 enforce expiry inside their decryptors before writing any
+	// plaintext. Keep this final check as a defensive guard for future formats.
+	// CLI decrypt paths also write to a temporary file that is removed on error.
 	if meta != nil && !meta.ExpiresAt.IsZero() && time.Now().After(meta.ExpiresAt) {
 		return nil, ErrExpired
 	}
