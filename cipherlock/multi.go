@@ -153,6 +153,9 @@ func readMultiHeader(r io.Reader) (multiHeader, error) {
 			return h, ErrInvalidFormat
 		}
 	}
+	if err := validateMultiRecipientKDFCost(h.Recipients); err != nil {
+		return h, err
+	}
 
 	if _, err := io.ReadFull(r, h.FileNonce[:]); err != nil {
 		return h, ErrInvalidFormat
@@ -184,6 +187,9 @@ func EncryptMulti(dst io.Writer, src io.Reader, passwords [][]byte, config *Conf
 
 	cfg, err := normalizedConfig(config)
 	if err != nil {
+		return err
+	}
+	if err := validateMultiRecipientConfig(len(passwords), cfg.Time, cfg.Memory); err != nil {
 		return err
 	}
 

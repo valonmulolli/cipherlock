@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
 	"hash"
 	"io"
 	"time"
@@ -24,11 +25,36 @@ type streamMultiHeader struct {
 
 // maxRecipients bounds the number of recipient entries accepted in a v0x07 (or
 // v0x04) header to prevent DoS amplification. unsealFileKey runs Argon2id once
-// per recipient until one matches, so with the new caps (maxMemory=256 MiB,
-// maxTime=60) a wrong password with 1024 recipients would burn ~25 minutes of
-// CPU before returning ErrAuthFailed. 16 covers any realistic use case
-// (audit log + a few team members) and caps the worst case at ~25 seconds.
+// per recipient until one matches, so the count is also constrained by the
+// cumulative KDF budget below.
 const maxRecipients = 16
+
+// maxMultiRecipientKDFCost bounds the cumulative Argon2id work accepted from a
+// multi-recipient header. It allows all maxRecipients entries to use the
+// default configuration while preventing a hostile header from multiplying the
+// per-entry limits into an impractical amount of CPU and memory pressure.
+const maxMultiRecipientKDFCost uint64 = uint64(maxRecipients) * 3 * 64 * 1024
+
+func validateMultiRecipientConfig(recipientCount int, time, memory uint32) error {
+	if recipientCount > maxRecipients {
+		return fmt.Errorf("%w: recipient count %d exceeds max %d", ErrConfigInvalid, recipientCount, maxRecipients)
+	}
+	if uint64(recipientCount)*uint64(time)*uint64(memory) > maxMultiRecipientKDFCost {
+		return fmt.Errorf("%w: cumulative recipient KDF cost exceeds limit", ErrConfigInvalid)
+	}
+	return nil
+}
+
+func validateMultiRecipientKDFCost(entries []recipientEntry) error {
+	var total uint64
+	for _, entry := range entries {
+		total += uint64(entry.Time) * uint64(entry.Memory)
+		if total > maxMultiRecipientKDFCost {
+			return ErrCorrupted
+		}
+	}
+	return nil
+}
 
 func writeStreamMultiHeader(w io.Writer, entries []recipientEntry, flags byte) error {
 	write := func(data any) error {
@@ -105,6 +131,9 @@ func readStreamMultiHeader(r io.Reader) (streamMultiHeader, error) {
 
 	entries, err := readRecipientEntries(r, numRecipients)
 	if err != nil {
+		return h, err
+	}
+	if err := validateMultiRecipientKDFCost(entries); err != nil {
 		return h, err
 	}
 	h.Recipients = entries
@@ -244,6 +273,9 @@ func EncryptStreamMulti(dst io.Writer, src io.Reader, passwords [][]byte, config
 
 	cfg, err := normalizedConfig(config)
 	if err != nil {
+		return err
+	}
+	if err := validateMultiRecipientConfig(len(passwords), cfg.Time, cfg.Memory); err != nil {
 		return err
 	}
 	chunkSize := cfg.ChunkSize

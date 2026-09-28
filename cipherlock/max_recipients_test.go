@@ -2,8 +2,8 @@ package cipherlock
 
 import (
 	"bytes"
+	"errors"
 	"testing"
-	"time"
 )
 
 func TestV07RejectsOversizedRecipientCount(t *testing.T) {
@@ -39,5 +39,48 @@ func TestV04RejectsOversizedRecipientCount(t *testing.T) {
 	if !bytes.Equal(dec.Bytes(), plaintext) {
 		t.Error("roundtrip mismatch")
 	}
-	_ = time.Now() // keep import for symmetry with other tests
+}
+
+func TestMultiRejectsExcessiveRecipientKDFCost(t *testing.T) {
+	entries := make([]recipientEntry, 2)
+	for i := range entries {
+		entries[i] = recipientEntry{
+			Salt:      bytes.Repeat([]byte{0x01}, 16),
+			Time:      maxTime,
+			Memory:    maxMemory,
+			Threads:   1,
+			KeyLen:    32,
+			SealedKey: bytes.Repeat([]byte{0x02}, sealedKeySize),
+		}
+	}
+
+	var buf bytes.Buffer
+	if err := writeStreamMultiHeader(&buf, entries, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	var dec bytes.Buffer
+	_, err := DecryptStreamMultiFromReader(&dec, bytes.NewReader(buf.Bytes()), []byte("password"))
+	if !errors.Is(err, ErrCorrupted) {
+		t.Fatalf("expected ErrCorrupted, got %v", err)
+	}
+
+	var legacy bytes.Buffer
+	if err := writeMultiHeader(&legacy, entries, make([]byte, nonceSize), nil, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := Decrypt(&bytes.Buffer{}, bytes.NewReader(legacy.Bytes()), []byte("password")); !errors.Is(err, ErrCorrupted) {
+		t.Fatalf("legacy format: expected ErrCorrupted, got %v", err)
+	}
+}
+
+func TestMultiEncryptionRejectsExcessiveRecipientKDFCost(t *testing.T) {
+	cfg := *DefaultConfig
+	cfg.Time = maxTime
+	cfg.Memory = maxMemory
+
+	err := EncryptStreamMulti(&bytes.Buffer{}, bytes.NewReader([]byte("data")), [][]byte{[]byte("a"), []byte("b")}, &cfg)
+	if !errors.Is(err, ErrConfigInvalid) {
+		t.Fatalf("expected ErrConfigInvalid, got %v", err)
+	}
 }
